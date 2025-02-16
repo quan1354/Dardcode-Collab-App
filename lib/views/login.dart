@@ -13,6 +13,26 @@ class _LoginFormState extends State<LoginForm> {
   final logger = Logger();
   final _formKey = GlobalKey<FormState>();
   bool _obscurePassword = true; // Track password visibility
+  String? _validatePassword(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Please enter your password';
+    }
+    if (value.length < 8) {
+      return 'Password must be at least 8 characters long';
+    }
+
+    // Check for at least two of the following: letter, number, or symbol
+    int count = 0;
+    if (RegExp(r'[A-Za-z]').hasMatch(value)) count++; // Check for letters
+    if (RegExp(r'[0-9]').hasMatch(value)) count++; // Check for numbers
+    if (RegExp(r'[!@#$%^&*(),.?":{}|<>]').hasMatch(value))count++; // Check for symbols
+
+    if (count < 2) {
+      return 'Password must include at least two of the following: letter, number, or symbol';
+    }
+
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -108,12 +128,13 @@ class _LoginFormState extends State<LoginForm> {
                       },
                     ),
                   ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter your password';
-                    }
-                    return null;
-                  },
+                  validator: _validatePassword,
+                  // validator: (value) {
+                  //   if (value == null || value.isEmpty) {
+                  //     return 'Please enter your password';
+                  //   }
+                  //   return null;
+                  // },
                 ),
                 Container(
                   alignment: Alignment.centerLeft, // Align text to left

@@ -1,6 +1,6 @@
 import 'package:darkord/views/login.dart';
+import 'package:darkord/views/email_verification.dart';
 import 'package:flutter/material.dart';
-
 import 'package:logger/logger.dart';
 
 class RegisterForm extends StatefulWidget {
@@ -13,8 +13,30 @@ class RegisterForm extends StatefulWidget {
 class _RegisterFormState extends State<RegisterForm> {
   final logger = Logger();
   final _formKey = GlobalKey<FormState>();
+  final TextEditingController _emailController = TextEditingController(); // Add email controller
   bool _obscurePassword = true; // Track password visibility
-  bool _obscureConfirmPassword = true;
+
+  // Function to validate password
+   String? _validatePassword(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Please enter your password';
+    }
+    if (value.length < 8) {
+      return 'Password must be at least 8 characters long';
+    }
+
+    // Check for at least two of the following: letter, number, or symbol
+    int count = 0;
+    if (RegExp(r'[A-Za-z]').hasMatch(value)) count++; // Check for letters
+    if (RegExp(r'[0-9]').hasMatch(value)) count++; // Check for numbers
+    if (RegExp(r'[!@#$%^&*(),.?":{}|<>]').hasMatch(value)) count++; // Check for symbols
+
+    if (count < 2) {
+      return 'Password must include at least two of the following: letter, number, or symbol';
+    }
+
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -91,6 +113,7 @@ class _RegisterFormState extends State<RegisterForm> {
                     hintStyle: TextStyle(color: Colors.white70),
                     prefixIcon: Icon(Icons.email, color: Colors.white),
                   ),
+                  controller: _emailController,
                   validator: (value) {
                     if (value == null || value.isEmpty) {
                       return 'Please enter your email';
@@ -139,57 +162,9 @@ class _RegisterFormState extends State<RegisterForm> {
                       },
                     ),
                   ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter your password';
-                    }
-                    return null;
-                  },
+                  validator: _validatePassword, // Use the new validation function
                 ),
                 const SizedBox(height: 20),
-                TextFormField(
-                  obscureText: _obscureConfirmPassword, // Use the state variable
-                  style: TextStyle(color: Colors.white),
-                  decoration: InputDecoration(
-                    border: OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderSide: BorderSide(
-                          color: Colors.white), // Normal border color
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderSide: BorderSide(
-                          color:
-                              Colors.blueAccent), // Border color when focused
-                    ),
-                    labelText: 'Confirm Password',
-                    labelStyle: TextStyle(color: Colors.white),
-                    hintText: 'Confirm Password',
-                    hintStyle: TextStyle(color: Colors.white70),
-                    prefixIcon: Icon(Icons.lock, color: Colors.white),
-                    suffixIcon: IconButton(
-                      icon: Icon(
-                        _obscureConfirmPassword
-                            ? Icons.visibility
-                            : Icons.visibility_off,
-                        color: Colors.white,
-                      ),
-                      onPressed: () {
-                        setState(() {
-                          _obscureConfirmPassword =
-                              !_obscureConfirmPassword; // Toggle visibility
-                        });
-                      },
-                    ),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter your password';
-                    }
-                    return null;
-                  },
-                ),
                 Container(
                   alignment: Alignment.centerLeft, // Align text to left
                   child: TextButton(
@@ -215,21 +190,17 @@ class _RegisterFormState extends State<RegisterForm> {
                   child: ElevatedButton(
                     onPressed: () {
                       if (_formKey.currentState!.validate()) {
-                        logger.i('Login successful');
+                        logger.i('Registration successful');
+                        String email = _emailController.text;
+                        Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => EmailVerificationPage(userEmail: email)),
+                      );
                       }
                     },
                     child: Text('Sign up for an account'),
                   ),
                 ),
-                // ElevatedButton(
-                //   onPressed: () {
-                //     Navigator.push(
-                //       context,
-                //       MaterialPageRoute(builder: (context) => MyCustomForm()),
-                //     );
-                //   },
-                //   child: Text('Go to Second View'),
-                // ),
               ],
             ),
           ),
