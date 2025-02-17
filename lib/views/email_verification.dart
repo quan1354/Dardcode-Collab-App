@@ -47,6 +47,7 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // appBar: AppBar(title: const Text('Email Verification')),
       body: Center(
         child: Form(
           key: _formKey,

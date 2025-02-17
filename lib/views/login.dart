@@ -25,7 +25,8 @@ class _LoginFormState extends State<LoginForm> {
     int count = 0;
     if (RegExp(r'[A-Za-z]').hasMatch(value)) count++; // Check for letters
     if (RegExp(r'[0-9]').hasMatch(value)) count++; // Check for numbers
-    if (RegExp(r'[!@#$%^&*(),.?":{}|<>]').hasMatch(value))count++; // Check for symbols
+    if (RegExp(r'[!@#$%^&*(),.?":{}|<>]').hasMatch(value))
+      count++; // Check for symbols
 
     if (count < 2) {
       return 'Password must include at least two of the following: letter, number, or symbol';
@@ -37,6 +38,16 @@ class _LoginFormState extends State<LoginForm> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // appBar: AppBar(
+      //   title: const Text(
+      //     'Login',
+      //     style: TextStyle(color: Colors.white), // Set text color to black
+      //   ),
+      //   backgroundColor: const Color.fromARGB(255, 54, 22, 181), // Set background color to white
+      //   iconTheme: const IconThemeData(
+      //       color: Colors.white), // Set back icon color to black
+      //   elevation: 0, // Optional: Remove shadow for a flat look
+      // ),
       body: Center(
         child: Form(
           key: _formKey,
@@ -136,6 +147,7 @@ class _LoginFormState extends State<LoginForm> {
                   //   return null;
                   // },
                 ),
+                const SizedBox(height: 8),
                 Container(
                   alignment: Alignment.centerLeft, // Align text to left
                   child: TextButton(
@@ -155,7 +167,7 @@ class _LoginFormState extends State<LoginForm> {
                     ),
                   ),
                 ),
-
+                const SizedBox(height: 5),
                 SizedBox(
                   width: 200, // Set the button width
                   child: ElevatedButton(

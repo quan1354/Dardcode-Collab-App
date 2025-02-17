@@ -13,11 +13,12 @@ class RegisterForm extends StatefulWidget {
 class _RegisterFormState extends State<RegisterForm> {
   final logger = Logger();
   final _formKey = GlobalKey<FormState>();
-  final TextEditingController _emailController = TextEditingController(); // Add email controller
+  final TextEditingController _emailController =
+      TextEditingController(); // Add email controller
   bool _obscurePassword = true; // Track password visibility
 
   // Function to validate password
-   String? _validatePassword(String? value) {
+  String? _validatePassword(String? value) {
     if (value == null || value.isEmpty) {
       return 'Please enter your password';
     }
@@ -29,7 +30,8 @@ class _RegisterFormState extends State<RegisterForm> {
     int count = 0;
     if (RegExp(r'[A-Za-z]').hasMatch(value)) count++; // Check for letters
     if (RegExp(r'[0-9]').hasMatch(value)) count++; // Check for numbers
-    if (RegExp(r'[!@#$%^&*(),.?":{}|<>]').hasMatch(value)) count++; // Check for symbols
+    if (RegExp(r'[!@#$%^&*(),.?":{}|<>]').hasMatch(value))
+      count++; // Check for symbols
 
     if (count < 2) {
       return 'Password must include at least two of the following: letter, number, or symbol';
@@ -41,6 +43,7 @@ class _RegisterFormState extends State<RegisterForm> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // appBar: AppBar(title: const Text('Registration')),
       body: Center(
         child: Form(
           key: _formKey,
@@ -162,9 +165,10 @@ class _RegisterFormState extends State<RegisterForm> {
                       },
                     ),
                   ),
-                  validator: _validatePassword, // Use the new validation function
+                  validator:
+                      _validatePassword, // Use the new validation function
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 8),
                 Container(
                   alignment: Alignment.centerLeft, // Align text to left
                   child: TextButton(
@@ -184,7 +188,7 @@ class _RegisterFormState extends State<RegisterForm> {
                     ),
                   ),
                 ),
-
+                const SizedBox(height: 5),
                 SizedBox(
                   width: 200, // Set the button width
                   child: ElevatedButton(
@@ -193,9 +197,11 @@ class _RegisterFormState extends State<RegisterForm> {
                         logger.i('Registration successful');
                         String email = _emailController.text;
                         Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => EmailVerificationPage(userEmail: email)),
-                      );
+                          context,
+                          MaterialPageRoute(
+                              builder: (context) =>
+                                  EmailVerificationPage(userEmail: email)),
+                        );
                       }
                     },
                     child: Text('Sign up for an account'),
