@@ -13,6 +13,7 @@ class RegisterForm extends StatefulWidget {
 class _RegisterFormState extends State<RegisterForm> {
   final logger = Logger();
   final _formKey = GlobalKey<FormState>();
+  final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _emailController =
       TextEditingController(); // Add email controller
   bool _obscurePassword = true; // Track password visibility
@@ -87,6 +88,7 @@ class _RegisterFormState extends State<RegisterForm> {
                     hintStyle: TextStyle(color: Colors.white70),
                     prefixIcon: Icon(Icons.person, color: Colors.white),
                   ),
+                  controller: _usernameController,
                   validator: (value) {
                     if (value == null || value.isEmpty) {
                       return 'Please enter your username';
@@ -192,16 +194,44 @@ class _RegisterFormState extends State<RegisterForm> {
                 SizedBox(
                   width: 200, // Set the button width
                   child: ElevatedButton(
-                    onPressed: () {
+                    // onPressed: () {
+                    //   if (_formKey.currentState!.validate()) {
+                    //     logger.i('Registration successful');
+                    //     String email = _emailController.text;
+                    //     String username = _usernameController.text;
+                    //     Navigator.push(
+                    //       context,
+                    //       MaterialPageRoute(
+                    //           builder: (context) =>
+                    //               EmailVerificationPage(userEmail: email, userName: username)),
+                    //     );
+                    //   }
+                    // },
+                    // child: Text('Sign up for an account'),
+                    onPressed: () async {
                       if (_formKey.currentState!.validate()) {
                         logger.i('Registration successful');
                         String email = _emailController.text;
-                        Navigator.push(
+                        String username = _usernameController.text;
+
+                        // Navigate to EmailVerificationPage and wait for result
+                        final result = await Navigator.push(
                           context,
                           MaterialPageRoute(
-                              builder: (context) =>
-                                  EmailVerificationPage(userEmail: email)),
+                            builder: (context) => EmailVerificationPage(
+                              userEmail: email,
+                              userName: username,
+                            ),
+                          ),
                         );
+
+                        // If result is not null, populate the fields
+                        if (result != null) {
+                          setState(() {
+                            _usernameController.text = result['username'];
+                            _emailController.text = result['email'];
+                          });
+                        }
                       }
                     },
                     child: Text('Sign up for an account'),

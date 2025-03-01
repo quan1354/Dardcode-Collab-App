@@ -148,25 +148,62 @@ class _LoginFormState extends State<LoginForm> {
                   // },
                 ),
                 const SizedBox(height: 8),
-                Container(
-                  alignment: Alignment.centerLeft, // Align text to left
-                  child: TextButton(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => RegisterForm()),
-                      );
-                    },
-                    child: Text(
-                      'forgot password?',
-                      style: TextStyle(
-                        color: const Color.fromARGB(255, 236, 57, 45),
-                        decoration: TextDecoration.underline, // Underline text
-                        decorationColor: Color.fromARGB(255, 236, 57, 45),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  children: [
+                    TextButton(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (context) => RegisterForm()),
+                        );
+                      },
+                      child: Text(
+                        'don\'t have account ?',
+                        style: TextStyle(
+                          color: const Color.fromARGB(255, 236, 57, 45),
+                          decoration:
+                              TextDecoration.underline, // Underline text
+                          decorationColor: Color.fromARGB(255, 236, 57, 45),
+                        ),
                       ),
                     ),
-                  ),
+                    TextButton(
+                      onPressed: () {
+                        
+                      },
+                      child: Text(
+                        'forgot password ?',
+                        style: TextStyle(
+                          color: const Color.fromARGB(255, 236, 57, 45),
+                          decoration:
+                              TextDecoration.underline, // Underline text
+                          decorationColor: Color.fromARGB(255, 236, 57, 45),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
+                // Container(
+                //   alignment: Alignment.centerLeft, // Align text to left
+                //   child: TextButton(
+                //     onPressed: () {
+                //       Navigator.push(
+                //         context,
+                //         MaterialPageRoute(builder: (context) => RegisterForm()),
+                //       );
+                //     },
+                //     child: Text(
+                //       'don\'t have account ?',
+                //       style: TextStyle(
+                //         color: const Color.fromARGB(255, 236, 57, 45),
+                //         decoration: TextDecoration.underline, // Underline text
+                //         decorationColor: Color.fromARGB(255, 236, 57, 45),
+                //       ),
+                //     ),
+                //   ),
+                // ),
                 const SizedBox(height: 5),
                 SizedBox(
                   width: 200, // Set the button width

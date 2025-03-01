@@ -4,8 +4,10 @@ import 'package:logger/logger.dart';
 
 class EmailVerificationPage extends StatefulWidget {
   final String userEmail;
+  final String userName;
 
-  const EmailVerificationPage({super.key, required this.userEmail});
+  const EmailVerificationPage(
+      {super.key, required this.userEmail, required this.userName});
 
   @override
   _EmailVerificationPageState createState() => _EmailVerificationPageState();
@@ -14,8 +16,9 @@ class EmailVerificationPage extends StatefulWidget {
 class _EmailVerificationPageState extends State<EmailVerificationPage> {
   final logger = Logger();
   final _formKey = GlobalKey<FormState>();
-  final TextEditingController _verificationCodeController = TextEditingController();
-  int _countdown = 300;
+  final TextEditingController _verificationCodeController =
+      TextEditingController();
+  int _countdown = 60;
   late Timer _timer;
 
   @override
@@ -78,11 +81,11 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
                   style: const TextStyle(color: Colors.white),
                   decoration: InputDecoration(
                     border: const OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white)),
+                        borderSide: BorderSide(color: Colors.white)),
                     enabledBorder: const OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white)),
+                        borderSide: BorderSide(color: Colors.white)),
                     focusedBorder: const OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.blueAccent)),
+                        borderSide: BorderSide(color: Colors.blueAccent)),
                     labelText: 'Email Address',
                     labelStyle: const TextStyle(color: Colors.white),
                     hintText: 'Email Address',
@@ -96,34 +99,77 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
                   style: const TextStyle(color: Colors.white),
                   decoration: InputDecoration(
                     border: const OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white)),
+                        borderSide: BorderSide(color: Colors.white)),
                     enabledBorder: const OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white)),
+                        borderSide: BorderSide(color: Colors.white)),
                     focusedBorder: const OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.blueAccent)),
+                        borderSide: BorderSide(color: Colors.blueAccent)),
                     labelText: 'Verification Code',
                     labelStyle: const TextStyle(color: Colors.white),
                     hintText: 'Enter verification code',
                     hintStyle: const TextStyle(color: Colors.white70),
                     prefixIcon: const Icon(Icons.lock, color: Colors.white),
                   ),
-                  validator: (value) => value?.isEmpty ?? true 
-                      ? 'Please enter the verification code' 
+                  validator: (value) => value?.isEmpty ?? true
+                      ? 'Please enter the verification code'
                       : null,
                 ),
-                const SizedBox(height: 20),
+                // const SizedBox(height: 20),
+                // Text(
+                //   'Time remaining: ${formatCountdown(_countdown)}',
+                //   style: const TextStyle(color: Colors.white, fontSize: 16),
+                // ),
+                TextButton(
+                  onPressed: () {
+                    // Navigate back to the RegisterForm and pass the username and email
+                    Navigator.pop(context, {
+                      'username': widget.userName,
+                      'email': widget.userEmail,
+                    });
+                  },
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.start,
+                    children: [
+                      const Icon(
+                        Icons.arrow_back, // Add a back icon
+                        color: Color.fromARGB(255, 236, 57, 45),
+                      ),
+                      const SizedBox(
+                          width: 5), // Add spacing between icon and text
+                      Text(
+                        'Back',
+                        style: TextStyle(
+                          color: const Color.fromARGB(255, 236, 57, 45),
+                          decoration: TextDecoration.underline,
+                          decorationColor: Color.fromARGB(255, 236, 57, 45),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
                     ElevatedButton(
-                      onPressed: _countdown > 0 ? null : () {
-                        setState(() => _countdown = 300);
-                        startCountdown();
-                        logger.i('Resend verification email');
-                      },
-                      child: Text(_countdown > 0 
-                          ? 'Resend Email (${formatCountdown(_countdown)})' 
-                          : 'Resend Email'),
+                      onPressed: _countdown > 0
+                          ? () {} // Disable the button if countdown is active
+                          : () {
+                              setState(
+                                  () => _countdown = 60); // Reset countdown
+                              startCountdown(); // Restart the timer
+                              logger.i('Resend verification email');
+                            },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _countdown > 0
+                            ? Colors.grey
+                            : Colors.blue, // Change color when disabled
+                        foregroundColor: Colors.white, // Text color
+                      ),
+                      child: Text(
+                        _countdown > 0
+                            ? 'Resend Email (${formatCountdown(_countdown)})'
+                            : 'Resend Email',
+                      ),
                     ),
                     ElevatedButton(
                       onPressed: () {
