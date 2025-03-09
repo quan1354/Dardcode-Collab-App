@@ -7,7 +7,7 @@ class EmailVerificationPage extends StatefulWidget {
   final String userName;
 
   const EmailVerificationPage(
-      {super.key, required this.userEmail, required this.userName});
+      {super.key, required this.userEmail, this.userName=''});
 
   @override
   _EmailVerificationPageState createState() => _EmailVerificationPageState();
@@ -59,7 +59,20 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.music_note, size: 70, color: Colors.white),
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white, // White background color
+                    border: Border.all(
+                      color: Colors.yellow, // Border color
+                      width: 5.0, // Border width
+                    ),
+                  ),
+                  child: Image.asset(
+                    'assets/logo2.png', // Path to your image
+                    width: 200, // Set the width
+                    height: 190, // Set the height
+                  ),
+                ),
                 const Text(
                   'Darkord',
                   style: TextStyle(
@@ -175,6 +188,7 @@ class _EmailVerificationPageState extends State<EmailVerificationPage> {
                       onPressed: () {
                         if (_formKey.currentState!.validate()) {
                           logger.i('Verification code submitted');
+                          Navigator.pop(context, {'verified': true});
                         }
                       },
                       child: const Text('Submit'),

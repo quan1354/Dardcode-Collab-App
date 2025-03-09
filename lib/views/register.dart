@@ -53,10 +53,19 @@ class _RegisterFormState extends State<RegisterForm> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
-                  Icons.music_note,
-                  size: 70,
-                  color: Colors.white,
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white, // White background color
+                    border: Border.all(
+                      color: Colors.yellow, // Border color
+                      width: 5.0, // Border width
+                    ),
+                  ),
+                  child: Image.asset(
+                    'assets/logo2.png', // Path to your image
+                    width: 200, // Set the width
+                    height: 190, // Set the height
+                  ),
                 ),
                 Text(
                   'Darkord',
