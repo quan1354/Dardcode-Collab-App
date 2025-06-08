@@ -1,3 +1,4 @@
+import 'dart:ffi';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'dart:async';
@@ -29,37 +30,43 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  // Change the type to Future<Map<String, dynamic>>?
   Future<Map<String, dynamic>>? _futureUser;
   final TextEditingController _controller = TextEditingController();
+  String? _userAccessToken; // Make this nullable
+  String? _userRefreshToken;
 
-  void _performLogin() async {
+  Future<Map<String, String>?> _performLogin() async {
     try {
-      // Example usage of the loginUser function
       final response =
           await loginUser('ii887522@gmail.com', 'ii887522@gmail.com');
-      print(
-          'Login Response: ${jsonEncode(response)}'); // Print the entire JSON content
+      print('Login Response: $response');
+
+      if (response['payload'] == null) {
+        throw Exception('Login succeeded but no payload received');
+      }
+
+      return {
+        'accessToken': response['payload']['access_token'],
+        'refreshToken': response['payload']['refresh_token'],
+      };
     } catch (e) {
-      print('Error: $e');
+      print('Login Error: $e');
+      return null;
     }
   }
 
   @override
   void initState() {
     super.initState();
-    // Call refresh token first
-    refreshToken('10000001').then((response) {
-      print('Token refresh successful: $response');
-      // After refreshing token, fetch the user data
-      _futureUser = fetchUser();
+
+    const tmp_reset_email = 'd@gmail.com';
+    const tmp_reset_password = 'aaaaaa';
+
+    resetPassword(tmp_reset_email, tmp_reset_password).then((response) {
+      print('Password reset successful: $response');
     }).catchError((error) {
-      print('Error refreshing token: $error');
-      // Even if refresh fails, try to fetch user (might work if token is still valid)
-      _futureUser = fetchUser();
+      print('Password reset failed: $error');
     });
-    _futureUser = fetchUser();
-    _performLogin();
   }
 
   @override
@@ -103,79 +110,266 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 }
 
-// ## 1) POST: login 
-Future<Map<String, dynamic>> loginUser(String email, String password) async {
+// ## 3) PUT: Reset Password
+Future<Map<String, dynamic>> resetPassword(
+    String emailAddr, String password) async {
   try {
-    // Define the URL for the login endpoint
-    final url = Uri.parse('https://d3v904dal0xey8.cloudfront.net/user/login');
+    // Step 1: Request password reset
+    final requestResetUrl = Uri.parse(
+        'https://d3v904dal0xey8.cloudfront.net/user/password/request');
+    final verifyOtpUrl =
+        Uri.parse('https://d3v904dal0xey8.cloudfront.net/user/password/request/otp');
+    final confirmResetUrl =
+        Uri.parse('https://d3v904dal0xey8.cloudfront.net/user/password');
 
-    // Define the headers, including the authorization token
     final headers = {
-      'Authorization':
-          'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6IjMifQ.eyJzdWIiOiIxMDAwMDAwMSIsImV4cCI6MTc0MTUyOTU4MSwibmJmIjoxNzQxNTI4NjgxLCJqdGkiOiI3MzlhNGMzYi00ZDE3LTQ4YWYtYWJmNS02NDM0M2NkN2YxNTIiLCJmYW1pbHkiOiI2Z25LcXlPbS1Bd0dyX3dacjkxN3hRIiwic2NvcGUiOiJHRVRfL3VzZXIve3VzZXJfaWR9IFBVVF8vdXNlci97dXNlcl9pZH0gUE9TVF8vdXNlci9sb2dvdXQifQ.ej_RctbAE51yD4n6zBTP8xs7deUmRcTT23RLzv2V0wg','Content-Type': 'application/json',
+      'Content-Type': 'application/json',
     };
 
-    // Define the body of the request
+    // 1. Initiate password reset request
+    final resetRequest = await http.put(
+      requestResetUrl,
+      headers: headers,
+      body: jsonEncode({'email_addr': emailAddr}),
+    );
+
+    final resetRequestData =
+        jsonDecode(resetRequest.body) as Map<String, dynamic>;
+    print('Reset Request Response: $resetRequestData');
+
+    if (resetRequest.statusCode != 200) {
+      throw Exception(
+          'Reset request failed: ${resetRequestData['message'] ?? 'Unknown error'}');
+    }
+
+    // Get session token and OTP (in staging)
+    final sessionToken =
+        resetRequestData['payload']?['session_token'] as String?;
+    final otp = resetRequestData['payload']?['otp'] as String?;
+
+    if (sessionToken == null || otp == null) {
+      throw Exception('Missing session token or OTP in response');
+    }
+    print(jsonEncode({'otp': otp}));
+    // 2. Verify OTP
+    final verifyResponse = await http.put(
+      verifyOtpUrl,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': sessionToken,
+      },
+      body: jsonEncode({'otp': otp}),
+    );
+
+    final verifyData = jsonDecode(verifyResponse.body) as Map<String, dynamic>;
+    print('OTP Verification Response: $verifyData');
+
+    if (verifyResponse.statusCode != 200) {
+      throw Exception(
+          'OTP verification failed: ${verifyData['message'] ?? 'Unknown error'}');
+    }
+
+    // 3. Confirm password reset
+    final resetResponse = await http.put(
+      confirmResetUrl,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': verifyData['payload']?['session_token'],
+      },
+      body: jsonEncode({
+        'password': password,
+      }),
+    );
+
+    final resetData = jsonDecode(resetResponse.body) as Map<String, dynamic>;
+    print('Password Reset Response: $resetData');
+
+    if (resetResponse.statusCode != 200) {
+      throw Exception(
+          'Password reset failed: ${resetData['message'] ?? 'Unknown error'}');
+    }
+
+    return resetData;
+  } catch (e) {
+    print('Reset Password Error: $e');
+    throw Exception('Password reset failed: ${e.toString()}');
+  }
+}
+
+// ## 2) POST: Sign Up
+Future<Map<String, dynamic>> signUpUser(
+    String username, String emailAddr, String password) async {
+  try {
+    // Step 1: Initial sign up request
+    final signUpUrl = Uri.parse('https://d3v904dal0xey8.cloudfront.net/user');
+    final signUpOtpUrl =
+        Uri.parse('https://d3v904dal0xey8.cloudfront.net/user/otp');
+    final signUpMfaUrl =
+        Uri.parse('https://d3v904dal0xey8.cloudfront.net/user/mfa');
+
+    final headers = {
+      'Content-Type': 'application/json',
+    };
+
+    // Initial sign up request
+    final signUpResponse = await http.post(
+      signUpUrl,
+      headers: headers,
+      body: jsonEncode({
+        'username': username,
+        'email_addr': emailAddr,
+        'password': password,
+      }),
+    );
+
+    final signUpData = jsonDecode(signUpResponse.body) as Map<String, dynamic>;
+    print('Initial Sign Up Response: $signUpData');
+
+    if (signUpResponse.statusCode != 200) {
+      throw Exception('Sign up failed: ${signUpData['message']}');
+    }
+
+    // Extract OTP from response (only available in staging)
+    final otp = signUpData['payload']?['otp'] as String?;
+    if (otp == null) {
+      throw Exception('OTP not received in response');
+    }
+
+    // Step 2: Verify OTP
+    final otpResponse = await http.post(
+      signUpOtpUrl,
+      headers: {'Authorization': signUpData['payload']?['session_token']},
+      body: jsonEncode({'otp': otp}),
+    );
+
+    final otpData = jsonDecode(otpResponse.body) as Map<String, dynamic>;
+    print('OTP Verification Response: $otpData');
+
+    if (otpResponse.statusCode != 200) {
+      throw Exception('OTP verification failed: ${otpData['message']}');
+    }
+
+    // Step 3: Complete MFA verification
+    // In a real app, you would get this from user input
+    final mfaCode =
+        otpData['payload']?['mfa_secret']; // This should come from user input
+    print(mfaCode);
+    final mfaResponse = await http.post(
+      signUpMfaUrl,
+      headers: {'Authorization': otpData['payload']?['session_token']},
+      body: jsonEncode({'mfa_code': mfaCode}),
+    );
+
+    final mfaData = jsonDecode(mfaResponse.body) as Map<String, dynamic>;
+    print('MFA Verification Response: $mfaData');
+
+    if (mfaResponse.statusCode != 200) {
+      throw Exception('MFA verification failed: ${mfaData['message']}');
+    }
+
+    return mfaData;
+  } catch (e) {
+    throw Exception('Sign up error: $e');
+  }
+}
+
+// ## 1) POST: login
+Future<Map<String, dynamic>> loginUser(String email, String password) async {
+  try {
+    final loginUrl =
+        Uri.parse('https://d3v904dal0xey8.cloudfront.net/user/login');
+    final mfaUrl =
+        Uri.parse('https://d3v904dal0xey8.cloudfront.net/user/login/mfa');
+
+    final headers = {
+      'Authorization':
+          'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6IjYifQ.eyJzdWIiOiIxMDAwMDAwMSIsImV4cCI6MTc0OTM0Mzk1MSwibmJmIjoxNzQ5MzQzNjUxLCJqdGkiOiJiOWEyOWI2Yi1mMjQyLTQxODMtYmYyNi1kMDE4NGJiYjI1MmYiLCJzY29wZSI6IlBPU1RfL3VzZXIvbG9naW4vbWZhIn0.PHFa-UIsqbOyz5wkdZzD77a4Z-4FFMzAin95HN2d_YE',
+      'Content-Type': 'application/json',
+    };
+
     final body = jsonEncode({
       'email_addr': email,
       'password': password,
     });
 
-    // Make the POST request
+    // Initial login request
     final response = await http.post(
-      url,
+      loginUrl,
       headers: headers,
       body: body,
     );
 
-    // Check the response status code
-    if (response.statusCode == 200) {
-      // If the server returns a 200 OK response, parse the JSON
-      return jsonDecode(response.body) as Map<String, dynamic>;
-    } else {
-      // If the server returns an error, throw an exception with the status code and response body
-      throw Exception(
-        'Failed to login. Status code: ${response.statusCode}, Response: ${response.body}',
-      );
+    final responseData = jsonDecode(response.body) as Map<String, dynamic>;
+    print(responseData);
+
+    // Check if login was successful
+    if (response.statusCode != 200) {
+      throw Exception('Login failed: ${responseData['message']}');
     }
+
+    // Check if payload exists
+    if (responseData['payload'] == null) {
+      throw Exception('Login failed: No payload received');
+    }
+
+    final sessionToken = responseData['payload']['session_token'];
+
+    // MFA request
+    final responseMfa = await http.post(
+      mfaUrl,
+      headers: {
+        'Authorization': sessionToken,
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({'mfa_code': '123456'}),
+    );
+
+    final mfaData = jsonDecode(responseMfa.body) as Map<String, dynamic>;
+    print(mfaData);
+
+    if (responseMfa.statusCode != 200) {
+      throw Exception('MFA failed: ${mfaData['message']}');
+    }
+
+    return mfaData;
   } catch (e) {
-    // Catch any exceptions (e.g., network errors, JSON parsing errors) and rethrow with additional context
-    throw Exception('An error occurred during login: $e');
+    throw Exception('Login error: $e');
   }
 }
 
+// ## 4) GET: list
+Future<Map<String, dynamic>> fetchUser(String? accessToken) async {
+  if (accessToken == null) {
+    throw Exception('No session token available');
+  }
 
-// ## 4) GET: list 
-Future<Map<String, dynamic>> fetchUser() async {
   try {
     final response = await http.get(
       Uri.parse('https://d3v904dal0xey8.cloudfront.net/user/10000001'),
-      // Send authorization headers to the backend if needed.
       headers: {
-        'Authorization':
-            'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6IjMifQ.eyJzdWIiOiIxMDAwMDAwMSIsImV4cCI6MTc0MTUyOTU4MSwibmJmIjoxNzQxNTI4NjgxLCJqdGkiOiI3MzlhNGMzYi00ZDE3LTQ4YWYtYWJmNS02NDM0M2NkN2YxNTIiLCJmYW1pbHkiOiI2Z25LcXlPbS1Bd0dyX3dacjkxN3hRIiwic2NvcGUiOiJHRVRfL3VzZXIve3VzZXJfaWR9IFBVVF8vdXNlci97dXNlcl9pZH0gUE9TVF8vdXNlci9sb2dvdXQifQ.ej_RctbAE51yD4n6zBTP8xs7deUmRcTT23RLzv2V0wg'},
+        'Authorization': accessToken,
+      },
     );
 
     if (response.statusCode == 200) {
-      // If the server did return a 200 OK response,
-      // then parse the JSON and return it as a Map.
       return jsonDecode(response.body) as Map<String, dynamic>;
     } else {
-      // If the server did not return a 200 OK response,
-      // throw an exception with the status code and response body.
       throw Exception(
         'Failed to load data. Status code: ${response.statusCode}, Response: ${response.body}',
       );
     }
   } catch (e) {
-    // Catch any exceptions (e.g., network errors, JSON parsing errors)
-    // and rethrow with additional context.
     throw Exception('An error occurred: $e');
   }
 }
 
-// ## 6) POST: refresh 
-Future<Map<String, dynamic>> refreshToken(String userId) async {
+// ## 6) POST: refresh access Token - 5 min Refresh token - 1 days
+Future<Map<String, dynamic>> refreshToken(
+    String userId, String? refreshToken) async {
+  if (refreshToken == null) {
+    throw Exception('Refresh token is null');
+  }
+
   try {
     // Define the URL for the refresh token endpoint
     final url = Uri.parse('https://d3v904dal0xey8.cloudfront.net/user/token');
@@ -183,6 +377,7 @@ Future<Map<String, dynamic>> refreshToken(String userId) async {
     // Define the headers
     final headers = {
       'Content-Type': 'application/json',
+      'Authorization': refreshToken
     };
 
     // Define the body of the request with the user_id
@@ -201,13 +396,13 @@ Future<Map<String, dynamic>> refreshToken(String userId) async {
     if (response.statusCode == 200) {
       // If the server returns a 200 OK response, parse the JSON
       final responseData = jsonDecode(response.body) as Map<String, dynamic>;
-      
+
       // You might want to store the new tokens here
       final accessToken = responseData['payload']['access_token'];
       final refreshToken = responseData['payload']['refresh_token'];
       print('New Access Token: $accessToken');
       print('New Refresh Token: $refreshToken');
-      
+
       return responseData;
     } else {
       // If the server returns an error, throw an exception
