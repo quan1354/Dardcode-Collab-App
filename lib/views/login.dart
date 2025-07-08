@@ -2,6 +2,8 @@ import 'package:darkord/views/register.dart';
 import 'package:darkord/views/reset_password.dart';
 import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
+import 'package:darkord/api/auth_api.dart';
+import 'package:darkord/utils/dialog_utils.dart';
 
 class LoginForm extends StatefulWidget {
   const LoginForm({super.key});
@@ -14,6 +16,12 @@ class _LoginFormState extends State<LoginForm> {
   final logger = Logger();
   final _formKey = GlobalKey<FormState>();
   bool _obscurePassword = true; // Track password visibility
+  bool _isLoading = false;
+  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
+  final AuthApi _authApi = AuthApi();
+
+
   String? _validatePassword(String? value) {
     if (value == null || value.isEmpty) {
       return 'Please enter your password';
@@ -34,6 +42,44 @@ class _LoginFormState extends State<LoginForm> {
     }
 
     return null;
+  }
+
+    Future<void> _submitForm() async {
+    if (!_formKey.currentState!.validate()) return;
+    
+    setState(() => _isLoading = true);
+    
+    try {
+      // Show loading dialog
+      DialogUtils.showLoading(context, 'Logging in...');
+      
+      final response = await _authApi.login(
+        _emailController.text.trim(),
+        _passwordController.text.trim(),
+      );
+      
+      // Close loading dialog
+      Navigator.pop(context);
+      
+      // Handle successful login
+      DialogUtils.showSuccess(context, 'Login successful!');
+      
+      // TODO: Navigate to home screen or store tokens
+      print('Login payload: ${response.payload}');
+      
+    } catch (e) {
+      // Close loading dialog if still open
+      if (mounted) Navigator.pop(context);
+      
+      // Show error dialog
+      if (mounted) {
+        DialogUtils.showError(context, e.toString());
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
   }
 
   @override
@@ -81,6 +127,7 @@ class _LoginFormState extends State<LoginForm> {
                 ),
                 const SizedBox(height: 20),
                 TextFormField(
+                  controller: _emailController,
                   style: TextStyle(color: Colors.white),
                   decoration: InputDecoration(
                     border: OutlineInputBorder(
@@ -114,6 +161,7 @@ class _LoginFormState extends State<LoginForm> {
                 ),
                 const SizedBox(height: 20),
                 TextFormField(
+                  controller: _passwordController,
                   obscureText: _obscurePassword, // Use the state variable
                   style: TextStyle(color: Colors.white),
                   decoration: InputDecoration(
@@ -224,10 +272,12 @@ class _LoginFormState extends State<LoginForm> {
                   child: ElevatedButton(
                     onPressed: () {
                       if (_formKey.currentState!.validate()) {
-                        logger.i('Login successful');
+                        _isLoading ? null : _submitForm();
                       }
                     },
-                    child: Text('Login'),
+                    child: _isLoading 
+                        ? const CircularProgressIndicator()
+                        : const Text('Login'),
                   ),
                 ),
                 // ElevatedButton(
