@@ -1,3 +1,4 @@
+import 'package:darkord/views/chat_list.dart';
 import 'package:flutter/material.dart';
 import 'package:darkord/views/login.dart';
 import 'package:darkord/consts/color.dart';
@@ -19,7 +20,7 @@ class MyApp extends StatelessWidget {
         ),
         scaffoldBackgroundColor: mainBGColor, 
       ),
-      home: LoginForm(),
+      home: ChatList(),
     );
   }
 }

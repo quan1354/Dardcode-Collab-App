@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 // import 'package:flutter/material.dart';
 
 // void main() {
@@ -16,21 +15,21 @@
 //       title: title,
 //       home: Scaffold(
 //         appBar: AppBar(title: const Text(title)),
-//         // body: GridView.count(
-//         //   // Create a grid with 2 columns.
-//         //   // If you change the scrollDirection to horizontal,
-//         //   // this produces 2 rows.
-//         //   crossAxisCount: 2,
-//         //   // Generate 100 widgets that display their index in the list.
-//         //   children: List.generate(100, (index) {
-//         //     return Center(
-//         //       child: Text(
-//         //         'Item $index',
-//         //         style: TextTheme.of(context).headlineSmall,
-//         //       ),
-//         //     );
-//         //   }),
-//         // ),
+//         body: GridView.count(
+//           // Create a grid with 2 columns.
+//           // If you change the scrollDirection to horizontal,
+//           // this produces 2 rows.
+//           crossAxisCount: 2,
+//           // Generate 100 widgets that display their index in the list.
+//           children: List.generate(100, (index) {
+//             return Center(
+//               child: Text(
+//                 'Item $index',
+//                 style: TextTheme.of(context).headlineSmall,
+//               ),
+//             );
+//           }),
+//         ),
 //         // body: Container(
 //         //   margin: const EdgeInsets.symmetric(vertical: 20),
 //         //   height: 200,
@@ -138,44 +137,44 @@
 // }
 
 // CHAPTER 3: Create a list with a floating navigation bar
-// import 'package:flutter/cupertino.dart';
+import 'package:flutter/cupertino.dart';
 
-// void main() => runApp(const MyApp());
+void main() => runApp(const MyApp());
 
-// class MyApp extends StatelessWidget {
-//   const MyApp({super.key});
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
 
-//   @override
-//   Widget build(BuildContext context) {
-//     const title = 'Floating Navigation Bar';
+  @override
+  Widget build(BuildContext context) {
+    const title = 'Floating Navigation Bar';
 
-//     return CupertinoApp(
-//       title: title,
-//       home: CupertinoPageScaffold(
-//         // No navigation bar provided to CupertinoPageScaffold,
-//         // only a body with a CustomScrollView.
-//         child: CustomScrollView(
-//           slivers: [
-//             // Add the navigation bar to the CustomScrollView.
-//             const CupertinoSliverNavigationBar(
-//               // Provide a standard title.
-//               largeTitle: Text(title),
-//             ),
-//             // Next, create a SliverList
-//             SliverList.builder(
-//               // The builder function returns a CupertinoListTile with a title
-//               // that displays the index of the current item.
-//               itemBuilder: (context, index) =>
-//                   CupertinoListTile(title: Text('Item #$index')),
-//               // Builds 50 CupertinoListTile
-//               itemCount: 50,
-//             ),
-//           ],
-//         ),
-//       ),
-//     );
-//   }
-// }
+    return CupertinoApp(
+      title: title,
+      home: CupertinoPageScaffold(
+        // No navigation bar provided to CupertinoPageScaffold,
+        // only a body with a CustomScrollView.
+        child: CustomScrollView(
+          slivers: [
+            // Add the navigation bar to the CustomScrollView.
+            const CupertinoSliverNavigationBar(
+              // Provide a standard title.
+              largeTitle: Text(title),
+            ),
+            // Next, create a SliverList
+            SliverList.builder(
+              // The builder function returns a CupertinoListTile with a title
+              // that displays the index of the current item.
+              itemBuilder: (context, index) =>
+                  CupertinoListTile(title: Text('Item #$index')),
+              // Builds 50 CupertinoListTile
+              itemCount: 50,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 // CHAPTER 4: Create a basic list - ListView
 // import 'package:flutter/material.dart';
@@ -295,6 +294,3 @@
 //     );
 //   }
 // }
-=======
-aaa
->>>>>>> 0cd7e6c61dc12e74d14a067353f0df5fcee6386d
