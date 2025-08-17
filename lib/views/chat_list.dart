@@ -57,33 +57,34 @@ class ChatList extends StatelessWidget {
             ),
           ),
 
-          // Chat list
+          // Chat list with single dummy user
           SliverList(
             delegate: SliverChildBuilderDelegate(
               (context, index) {
+                // Only show one user with the specified details
                 return ListTile(
                   leading: const CircleAvatar(
                     backgroundColor: Colors.grey,
                     child: Icon(Icons.person, color: Colors.white),
                   ),
-                  title: Text(
-                    'User ${index + 1}',
-                    style: const TextStyle(color: Colors.white),
+                  title: const Text(
+                    'ii887522',
+                    style: TextStyle(color: Colors.white),
                   ),
-                  subtitle: Text(
-                    'Last message ${index + 1}',
-                    style: const TextStyle(color: Colors.grey),
+                  subtitle: const Text(
+                    'Hello there!',
+                    style: TextStyle(color: Colors.grey),
                   ),
-                  trailing: Text(
-                    '${index + 1}:${index + 1}0',
-                    style: const TextStyle(color: Colors.grey),
+                  trailing: const Text(
+                    '1:30',
+                    style: TextStyle(color: Colors.grey),
                   ),
                   onTap: () {
                     // Handle chat tap
                   },
                 );
               },
-              childCount: 20,
+              childCount: 1, // Only one item in the list
             ),
           ),
         ],

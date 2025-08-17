@@ -20,7 +20,7 @@ class MyApp extends StatelessWidget {
         ),
         scaffoldBackgroundColor: mainBGColor, 
       ),
-      home: ChatList(),
+      home: LoginForm(),
     );
   }
 }
