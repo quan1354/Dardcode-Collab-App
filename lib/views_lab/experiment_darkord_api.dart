@@ -34,6 +34,7 @@ class _MyHomePageState extends State<MyHomePage> {
   final TextEditingController _controller = TextEditingController();
   String? _userAccessToken; // Make this nullable
   String? _userRefreshToken;
+  bool _isLoading = false;
 
   Future<Map<String, String>?> _performLogin() async {
     try {
@@ -58,15 +59,38 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void initState() {
     super.initState();
+    // Optionally auto-login when the app starts
+    _performLoginAndFetchUser();
+  }
 
-    const tmp_reset_email = 'd@gmail.com';
-    const tmp_reset_password = 'aaaaaa';
-
-    resetPassword(tmp_reset_email, tmp_reset_password).then((response) {
-      print('Password reset successful: $response');
-    }).catchError((error) {
-      print('Password reset failed: $error');
+  Future<void> _performLoginAndFetchUser() async {
+    setState(() {
+      _isLoading = true;
     });
+
+    try {
+      // First perform login
+      final tokens = await _performLogin();
+
+      if (tokens != null) {
+        _userAccessToken = tokens['accessToken'];
+        _userRefreshToken = tokens['refreshToken'];
+
+        // Then fetch user data using the access token
+        setState(() {
+          _futureUser = fetchUser(_userAccessToken);
+        });
+      } else {
+        throw Exception('Login failed');
+      }
+    } catch (e) {
+      print('Error during login or fetch: $e');
+      // Handle error appropriately
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
   }
 
   @override
@@ -76,37 +100,112 @@ class _MyHomePageState extends State<MyHomePage> {
         title: const Text('Fetch User Example'),
       ),
       body: Center(
-        child: FutureBuilder<Map<String, dynamic>>(
-          future: _futureUser,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const CircularProgressIndicator();
-            } else if (snapshot.hasError) {
-              return Text('Error: ${snapshot.error}');
-            } else if (!snapshot.hasData) {
-              return const Text('No data found');
-            } else {
-              // Access the data directly from the snapshot
-              final user = snapshot.data!;
-              final payload = user['payload'] as Map<String, dynamic>;
-              final identity = payload['identity'] as Map<String, dynamic>;
-              final status = payload['status'] as Map<String, dynamic>;
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (_isLoading)
+              const CircularProgressIndicator()
+            else if (_futureUser == null)
+              ElevatedButton(
+                onPressed: _performLoginAndFetchUser,
+                child: const Text('Login and Fetch User'),
+              )
+            else
+              FutureBuilder<Map<String, dynamic>>(
+                future: _futureUser,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const CircularProgressIndicator();
+                  } else if (snapshot.hasError) {
+                    return Text('Error: ${snapshot.error}');
+                  } else if (!snapshot.hasData) {
+                    return const Text('No data found');
+                  } else {
+                    final user = snapshot.data!;
 
-              return Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text('User ID: ${identity['user_id']}'),
-                  Text('Username: ${identity['username']}'),
-                  Text('Email: ${identity['email_addr']}'),
-                  Text('Status: ${status['status']}'),
-                  Text('About Me: ${status['about_me']}'),
-                ],
-              );
-            }
-          },
+                    if (user['payload'] == null) {
+                      return const Text('Invalid user data format');
+                    }
+
+                    final payload = user['payload'] as Map<String, dynamic>;
+
+                    // Check if results exist and has at least one item
+                    if (payload['results'] == null ||
+                        (payload['results'] as List).isEmpty) {
+                      return const Text('No user data found in results');
+                    }
+
+                    // Get the first result (since we requested only one user)
+                    final result =
+                        (payload['results'] as List)[0] as Map<String, dynamic>;
+
+                    // Check if identity and status exist in the result
+                    if (result['identity'] == null ||
+                        result['status'] == null) {
+                      return const Text(
+                          'Missing identity or status in user data');
+                    }
+
+                    final identity = result['identity'] as Map<String, dynamic>;
+                    final status = result['status'] as Map<String, dynamic>;
+
+                    return Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text('User ID: ${identity['user_id'] ?? 'N/A'}'),
+                        Text('Username: ${identity['username'] ?? 'N/A'}'),
+                        Text('Email: ${identity['email_addr'] ?? 'N/A'}'),
+                        Text('Status: ${status['status'] ?? 'N/A'}'),
+                        Text('About Me: ${status['about_me'] ?? 'N/A'}'),
+                      ],
+                    );
+                  }
+                },
+              ),
+          ],
         ),
       ),
     );
+  }
+}
+
+// ## 4) GET: list
+Future<Map<String, dynamic>> fetchUser(String? accessToken) async {
+  print(accessToken);
+  if (accessToken == null) {
+    throw Exception('No session token available');
+  }
+
+  try {
+    // Build the URL with query parameters
+    final uri = Uri.parse('https://d3v904dal0xey8.cloudfront.net/user/list')
+        .replace(queryParameters: {
+      'user_ids': '10000020',
+      'identity': 'true',
+      'status': 'true',
+    });
+
+    print('Request URL: ${uri.toString()}');
+
+    final response = await http.get(
+      uri,
+      headers: {
+        'Authorization': accessToken,
+      },
+    );
+
+    print('Response status: ${response.statusCode}');
+    print('Response body: ${response.body}');
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } else {
+      throw Exception(
+        'Failed to load data. Status code: ${response.statusCode}, Response: ${response.body}',
+      );
+    }
+  } catch (e) {
+    throw Exception('An error occurred: $e');
   }
 }
 
@@ -117,8 +216,8 @@ Future<Map<String, dynamic>> resetPassword(
     // Step 1: Request password reset
     final requestResetUrl = Uri.parse(
         'https://d3v904dal0xey8.cloudfront.net/user/password/request');
-    final verifyOtpUrl =
-        Uri.parse('https://d3v904dal0xey8.cloudfront.net/user/password/request/otp');
+    final verifyOtpUrl = Uri.parse(
+        'https://d3v904dal0xey8.cloudfront.net/user/password/request/otp');
     final confirmResetUrl =
         Uri.parse('https://d3v904dal0xey8.cloudfront.net/user/password');
 
@@ -334,32 +433,6 @@ Future<Map<String, dynamic>> loginUser(String email, String password) async {
     return mfaData;
   } catch (e) {
     throw Exception('Login error: $e');
-  }
-}
-
-// ## 4) GET: list
-Future<Map<String, dynamic>> fetchUser(String? accessToken) async {
-  if (accessToken == null) {
-    throw Exception('No session token available');
-  }
-
-  try {
-    final response = await http.get(
-      Uri.parse('https://d3v904dal0xey8.cloudfront.net/user/10000001'),
-      headers: {
-        'Authorization': accessToken,
-      },
-    );
-
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body) as Map<String, dynamic>;
-    } else {
-      throw Exception(
-        'Failed to load data. Status code: ${response.statusCode}, Response: ${response.body}',
-      );
-    }
-  } catch (e) {
-    throw Exception('An error occurred: $e');
   }
 }
 
