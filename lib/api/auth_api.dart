@@ -16,8 +16,8 @@ class AuthApi {
     try {
       print(email);
       print(password);
-      email = 'ii887522@gmail.com';
-      password = 'ii887522@gmail.com';
+      // email = 'ii887522@gmail.com';
+      // password = 'ii887522@gmail.com';
       final url = Uri.parse('$_baseUrl/user/login');
       final url_mfa = Uri.parse('$_baseUrl/user/login/mfa');
 
@@ -59,7 +59,7 @@ class AuthApi {
       print(accessToken);
       // _refreshToken = responseData['payload']['refresh_token'];
       return mfaData;
-      //return AuthResponse.fromJson(responseData);
+      //return AuthResponse.fromJson(responseData);f
     } catch (e) {
       throw Exception('Login error: ${e.toString()}');
     }
@@ -106,6 +106,39 @@ class AuthApi {
       if (sessionToken == null) {
         throw Exception('Session token not received');
       }
+
+      // Step 2: Verify OTP
+      final otpResponse = await http.post(
+        signUpOtpUrl,
+        headers: {'Authorization': signUpData['payload']?['session_token']},
+        body: jsonEncode({'otp': otp}),
+      );
+
+      final otpData = jsonDecode(otpResponse.body) as Map<String, dynamic>;
+      print('OTP Verification Response: $otpData');
+
+      if (otpResponse.statusCode != 200) {
+        throw Exception('OTP verification failed: ${otpData['message']}');
+      }
+
+      // Step 3: Complete MFA verification
+      // In a real app, you would get this from user input
+      final mfaCode =
+          otpData['payload']?['mfa_secret']; // This should come from user input
+      print(mfaCode);
+      final mfaResponse = await http.post(
+        signUpMfaUrl,
+        headers: {'Authorization': otpData['payload']?['session_token']},
+        body: jsonEncode({'mfa_code': mfaCode}),
+      );
+
+      final mfaData = jsonDecode(mfaResponse.body) as Map<String, dynamic>;
+      print('MFA Verification Response: $mfaData');
+
+      if (mfaResponse.statusCode != 200) {
+        throw Exception('MFA verification failed: ${mfaData['message']}');
+      }
+      print(mfaData);
 
       // Extract reset token
       final resetToken = signUpData['payload']?['resend_otp_token'] as String?;
@@ -388,6 +421,7 @@ class AuthApi {
 
       if (response.statusCode == 200) {
         final responseData = jsonDecode(response.body) as Map<String, dynamic>;
+        print(responseData);
 
         if (responseData['payload'] != null &&
             responseData['payload']['results'] != null &&

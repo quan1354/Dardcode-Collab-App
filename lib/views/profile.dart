@@ -8,8 +8,10 @@ import 'package:darkord/api/auth_provider.dart'; // You'll need to create this
 class UserProfilePage extends StatefulWidget {
   final String userId;
   final String accessToken;
+  
 
-  const UserProfilePage({super.key, required this.userId, required this.accessToken});
+  const UserProfilePage(
+      {super.key, required this.userId, required this.accessToken});
 
   @override
   State<UserProfilePage> createState() => _UserProfilePageState();
@@ -17,24 +19,16 @@ class UserProfilePage extends StatefulWidget {
 
 class _UserProfilePageState extends State<UserProfilePage> {
   late Future<User> _futureUser;
+  final authApi = AuthApi();
 
   @override
   void initState() {
     super.initState();
     _futureUser = _fetchUserData();
+    print(_futureUser);
   }
 
   Future<User> _fetchUserData() async {
-    // final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    // final accessToken = authProvider.accessToken;
-    // print('Access Token: $accessToken');
-    
-    // if (widget.accessToken == null) {
-    //   throw Exception('No access token available. Please login first.');
-    // }
-    
-    // You'll need to make fetchUser available through AuthProvider or access AuthApi
-    final authApi = AuthApi(); // This should be the same instance
     return await authApi.fetchUser(widget.accessToken, widget.userId);
   }
 
@@ -105,18 +99,24 @@ class _UserProfilePageState extends State<UserProfilePage> {
                                 image: NetworkImage(user.avatarUrl!),
                                 fit: BoxFit.cover,
                               )
-                            : const DecorationImage(
-                                image: AssetImage('assets/default_avatar.png'),
-                                fit: BoxFit.cover,
-                              ),
+                            : null, // Set to null when no avatar
+                        color: user.avatarUrl == null
+                            ? Colors.grey
+                            : null, // Background color for fallback
                       ),
+                      child: user.avatarUrl == null
+                          ? const Icon(Icons.person,
+                              size: 70, color: Colors.white)
+                          : null,
                     ),
                     // Status indicator
                     Container(
                       width: 24,
                       height: 24,
                       decoration: BoxDecoration(
-                        color: user.status == 'online' ? Colors.green : Colors.grey,
+                        color: user.status == 'online'
+                            ? Colors.green
+                            : Colors.grey,
                         shape: BoxShape.circle,
                         border: Border.all(
                           color: mainBGColor,
@@ -126,7 +126,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 8),
                 // Username
                 Text(
                   user.username,
@@ -136,7 +136,35 @@ class _UserProfilePageState extends State<UserProfilePage> {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                const SizedBox(height: 32),
+                // Edit Profile button
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: () {
+                    // TODO: Implement edit profile functionality
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.grey[800],
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('Edit Profile'),
+                      const SizedBox(width: 4),
+                      Icon(Icons.edit, 
+                          size: 16, 
+                          color: const Color.fromARGB(255, 54, 188, 255)), // Green pencil icon
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 24),
                 // Email section
                 _buildProfileSection(
                   icon: Icons.email,
@@ -154,31 +182,53 @@ class _UserProfilePageState extends State<UserProfilePage> {
                 ),
                 const SizedBox(height: 32),
                 // About me section
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'About Me',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
                 Container(
-                  width: double.infinity,
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
                     color: Colors.grey[900],
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Text(
-                    user.aboutMe,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                    ),
+                  child: Row(
+                    children: [
+                      // const Icon(Icons.info, color: Colors.grey),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'About Me',
+                              style: TextStyle(
+                                color: Colors.grey,
+                                fontSize: 14,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            // Text(
+                            //   user.aboutMe,
+                            //   style: const TextStyle(
+                            //     color: Colors.white,
+                            //     fontSize: 16,
+                            //   ),
+                            // ),
+                            Text(
+                              'å¸ææ¨å¤©å¤©é½ä¼æ³æ~~',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.arrow_forward_ios, 
+                            color: Colors.grey, size: 16),
+                        onPressed: () {
+                          // TODO: Implement edit about me functionality
+                        },
+                      ),
+                    ],
                   ),
                 ),
               ],
