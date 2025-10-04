@@ -438,4 +438,37 @@ class AuthApi {
       throw Exception('Error fetching user: $e');
     }
   }
+
+  // TODO: Fetch multiple users by their IDs, no need pass any parameters, all I going trigger default. 
+  Future<List<User>> fetchNearbyUsers(String accessToken) async {
+    try {
+      final uri = Uri.parse('$_baseUrl/user/list');
+
+      final response = await http.get(
+        uri,
+        headers: {
+          'Authorization': accessToken,
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final responseData = jsonDecode(response.body) as Map<String, dynamic>;
+        print(responseData);
+
+        if (responseData['payload'] != null &&
+            responseData['payload']['results'] != null) {
+          final usersData = responseData['payload']['results'] as List;
+          return usersData.map((userJson) => User.fromJson(userJson)).toList();
+        } else {
+          throw Exception('No user data found');
+        }
+      } else {
+        throw Exception('Failed to fetch users: ${response.statusCode}');
+      }
+    } catch (e) {
+      throw Exception('Error fetching users: $e');
+    }
+  }
 }
+
+
