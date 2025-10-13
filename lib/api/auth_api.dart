@@ -221,7 +221,6 @@ class AuthApi {
     }
   }
 
-  // Add this method to your AuthApi class
   Future<Map<String, dynamic>> resendOtp(String sessionToken) async {
     try {
       final resendOtpUrl = Uri.parse('$_baseUrl/user/otp/resend');
@@ -247,7 +246,6 @@ class AuthApi {
     }
   }
 
-// Add this method to your AuthApi class
   Future<Map<String, dynamic>> resetPassword(
       String emailAddr, String password) async {
     try {
@@ -339,7 +337,6 @@ class AuthApi {
     }
   }
 
-// Add this method for password reset OTP verification only
   Future<Map<String, dynamic>> verifyPasswordResetOtp(
       String sessionToken, String otp) async {
     try {
@@ -371,7 +368,6 @@ class AuthApi {
     }
   }
 
-// Add this method for initiating password reset
   Future<Map<String, dynamic>> initiatePasswordReset(String emailAddr) async {
     try {
       final requestResetUrl = Uri.parse('$_baseUrl/user/password/request');
@@ -404,12 +400,10 @@ class AuthApi {
     }
   }
 
-  Future<User> fetchUser(String accessToken, String userId) async {
+  Future<User> fetchSingleUser(String accessToken, String userId) async {
     try {
       final uri = Uri.parse('$_baseUrl/user/list').replace(queryParameters: {
         'user_ids': userId,
-        'identity': 'true',
-        'status': 'true',
       });
 
       final response = await http.get(
@@ -439,8 +433,7 @@ class AuthApi {
     }
   }
 
-  // TODO: Fetch multiple users by their IDs, no need pass any parameters, all I going trigger default. 
-  Future<List<User>> fetchNearbyUsers(String accessToken) async {
+  Future<List<User>> findNearbyUsers(String accessToken) async {
     try {
       final uri = Uri.parse('$_baseUrl/user/list');
 
@@ -453,7 +446,7 @@ class AuthApi {
 
       if (response.statusCode == 200) {
         final responseData = jsonDecode(response.body) as Map<String, dynamic>;
-        print(responseData);
+        // print(responseData);
 
         if (responseData['payload'] != null &&
             responseData['payload']['results'] != null) {
@@ -469,6 +462,63 @@ class AuthApi {
       throw Exception('Error fetching users: $e');
     }
   }
+
+  Future<Map<String, dynamic>> addUsers(String accessToken, String user_id, List<String> other_user_ids)async{
+    try {
+      print('TTTTTTTTTTTTTTTTTTTTTTTT: $accessToken');
+      final addUsersUrl = Uri.parse('$_baseUrl/chat/$user_id/list');
+
+      final response = await http.post(
+        addUsersUrl,
+        headers: {
+          'Authorization': accessToken,
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'other_user_ids': other_user_ids}),
+      );
+
+      final responseData = jsonDecode(response.body) as Map<String, dynamic>;
+      print('Add Users Response: $responseData');
+
+      if (response.statusCode != 200) {
+        throw Exception('Add Users failed: ${responseData['message']}');
+      }
+
+      return {'success': true, 'message': 'Add Users successfully'};
+    } catch (e) {
+      throw Exception('Add Users error: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>> fetchUsers(String accessToken, String user_id) async {
+  try {
+    final fetchUsersUrl = Uri.parse('$_baseUrl/chat/$user_id/list');
+
+    final response = await http.get(
+      fetchUsersUrl,
+      headers: {
+        'Authorization': accessToken,
+        'Content-Type': 'application/json',
+      },
+    );
+
+    final responseData = jsonDecode(response.body) as Map<String, dynamic>;
+    print('Fetch Users successfully: $responseData');
+
+    if (response.statusCode != 200) {
+      throw Exception('Fetch Users failed: ${responseData['message']}');
+    }
+
+    // Return both success and the actual data
+    return {
+      'success': true,
+      'message': 'Fetch Users successfully',
+      'data': responseData // Include the actual data
+    };
+    
+  } catch (e) {
+    throw Exception('Fetch Users error: $e');
+  }
 }
 
-
+}

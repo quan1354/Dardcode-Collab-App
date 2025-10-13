@@ -2,17 +2,19 @@
 import 'package:flutter/material.dart';
 import 'package:darkord/consts/color.dart';
 import 'package:darkord/models/user.dart';
-import 'package:provider/provider.dart';
-import 'package:darkord/api/auth_api.dart'; // Change this import
+import 'package:darkord/views/chat_list.dart';
+import 'package:darkord/api/auth_api.dart';
 
 class AddFriendPage extends StatefulWidget {
   final String accessToken;
   final Map<String, dynamic>? userData;
+  final List<dynamic>? currentFriends; // Add this parameter
 
   const AddFriendPage({
     super.key,
     required this.accessToken,
     this.userData,
+    this.currentFriends, // Add this parameter
   });
 
   @override
@@ -22,11 +24,11 @@ class AddFriendPage extends StatefulWidget {
 class _AddFriendPageState extends State<AddFriendPage> {
   final TextEditingController _searchController = TextEditingController();
   String _currentStatus = 'online';
-  final Set<int> _selectedIndices = {}; // Track selected nearby people indices
+  final Set<int> _selectedIndices = {};
   final AuthApi _authApi = AuthApi();
-  
-  // Replace sample data with actual API data
+
   List<User> _nearbyUsers = [];
+  List<User> _filteredNearbyUsers = []; // Add filtered list
   bool _isLoading = true;
   String _errorMessage = '';
 
@@ -45,7 +47,39 @@ class _AddFriendPageState extends State<AddFriendPage> {
     super.dispose();
   }
 
-  // TODO: Fetch nearby users using the API
+  // Method to filter out already friends
+  void _filterOutFriends(List<User> allUsers) {
+    if (widget.currentFriends == null || widget.currentFriends!.isEmpty) {
+      setState(() {
+        _filteredNearbyUsers = allUsers;
+      });
+      return;
+    }
+
+    // Extract friend user IDs from current friends list
+    final friendUserIds = widget.currentFriends!.map((friend) {
+      return friend['user_id'].toString();
+    }).toSet();
+
+    print('Current friend IDs: $friendUserIds');
+    print('Total nearby users before filtering: ${allUsers.length}');
+
+    // Filter out users who are already friends
+    final filteredUsers = allUsers.where((user) {
+      final isAlreadyFriend = friendUserIds.contains(user.userId.toString());
+      if (isAlreadyFriend) {
+        print('Filtering out already friend: ${user.username} (${user.userId})');
+      }
+      return !isAlreadyFriend;
+    }).toList();
+
+    print('Total nearby users after filtering: ${filteredUsers.length}');
+
+    setState(() {
+      _filteredNearbyUsers = filteredUsers;
+    });
+  }
+
   Future<void> _fetchNearbyUsers() async {
     try {
       setState(() {
@@ -53,7 +87,10 @@ class _AddFriendPageState extends State<AddFriendPage> {
         _errorMessage = '';
       });
 
-      final users = await _authApi.fetchNearbyUsers(widget.accessToken);
+      final users = await _authApi.findNearbyUsers(widget.accessToken);
+
+      // Filter out already friends
+      _filterOutFriends(users);
       
       setState(() {
         _nearbyUsers = users;
@@ -69,12 +106,27 @@ class _AddFriendPageState extends State<AddFriendPage> {
   }
 
   void _searchUsers() {
-    final String query = _searchController.text.trim();
+    final String query = _searchController.text.trim().toLowerCase();
     if (query.isNotEmpty) {
       print('Searching for: $query');
-      // You can implement search filtering here
-      // For now, we'll just refetch all users
-      _fetchNearbyUsers();
+      
+      // Filter the already filtered list by search query
+      final searchResults = _filteredNearbyUsers.where((user) {
+        final username = user.username?.toLowerCase() ?? '';
+        final email = user.emailAddr?.toLowerCase() ?? '';
+        final userId = user.userId?.toString() ?? '';
+        
+        return username.contains(query) || 
+               email.contains(query) || 
+               userId.contains(query);
+      }).toList();
+
+      setState(() {
+        _filteredNearbyUsers = searchResults;
+      });
+    } else {
+      // If search is empty, reset to original filtered list
+      _filterOutFriends(_nearbyUsers);
     }
   }
 
@@ -88,27 +140,55 @@ class _AddFriendPageState extends State<AddFriendPage> {
     });
   }
 
-  // TODO: After click add selected persons, no need send request, direct add to chat_list.dart
-  void _addSelectedPersons() {
+  void _addSelectedPersons() async {
     if (_selectedIndices.isNotEmpty) {
-      final selectedUsers = _selectedIndices.map((index) => _nearbyUsers[index]).toList();
-      print('Adding ${selectedUsers.length} persons: ${selectedUsers.map((u) => u.username).toList()}');
-      
-      // TODO: Implement your add friends logic here
-      // You can call an API to send friend requests to all selected users
-      
-      // Show success message
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Friend requests sent to ${selectedUsers.length} users'),
-          backgroundColor: Colors.green,
-        ),
-      );
-      
-      // Clear selection after adding
-      setState(() {
-        _selectedIndices.clear();
-      });
+      final selectedUsers =
+          _selectedIndices.map((index) => _filteredNearbyUsers[index]).toList();
+      final selectedUserIds =
+          selectedUsers.map((user) => user.userId.toString()).toList();
+
+      try {
+        setState(() {
+          _isLoading = true;
+        });
+
+        // Make the actual API call with selected user IDs
+        await _authApi.addUsers(widget.accessToken,
+            widget.userData!['user_id'].toString(), selectedUserIds);
+
+        // Show success message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content:
+                Text('Friend requests sent to ${selectedUsers.length} users'),
+            backgroundColor: Colors.green,
+          ),
+        );
+
+        // Navigate to chat_list.dart page after success
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ChatList(
+              accessToken: widget.accessToken,
+            ),
+          ),
+        );
+      } catch (error) {
+        // Show error message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to send friend requests: $error'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        print('Error adding friends: $error');
+      } finally {
+        setState(() {
+          _isLoading = false;
+          _selectedIndices.clear();
+        });
+      }
     }
   }
 
@@ -226,7 +306,7 @@ class _AddFriendPageState extends State<AddFriendPage> {
                 CircleAvatar(
                   backgroundColor: Colors.grey,
                   radius: 25,
-                  backgroundImage: user.avatarUrl != null 
+                  backgroundImage: user.avatarUrl != null
                       ? NetworkImage(user.avatarUrl!)
                       : null,
                   child: user.avatarUrl == null
@@ -273,6 +353,40 @@ class _AddFriendPageState extends State<AddFriendPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(
+            Icons.group_off,
+            color: Colors.grey,
+            size: 64,
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'No new users found',
+            style: TextStyle(
+              color: Colors.grey,
+              fontSize: 18,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            widget.currentFriends != null && widget.currentFriends!.isNotEmpty
+                ? 'All nearby users are already your friends'
+                : 'No users found nearby',
+            style: TextStyle(
+              color: Colors.grey[600],
+              fontSize: 14,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
       ),
     );
   }
@@ -334,12 +448,19 @@ class _AddFriendPageState extends State<AddFriendPage> {
                               contentPadding:
                                   EdgeInsets.symmetric(horizontal: 16),
                             ),
-                            onSubmitted: (_) => _searchUsers(),
+                            onChanged: (_) => _searchUsers(),
                           ),
                         ),
                         IconButton(
                           icon: const Icon(Icons.search, color: Colors.grey),
                           onPressed: _searchUsers,
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.clear, color: Colors.grey),
+                          onPressed: () {
+                            _searchController.clear();
+                            _searchUsers();
+                          },
                         ),
                       ],
                     ),
@@ -394,7 +515,9 @@ class _AddFriendPageState extends State<AddFriendPage> {
               ),
 
               // Discover Nearby People Title
-              if (!_isLoading && _errorMessage.isEmpty && _nearbyUsers.isNotEmpty)
+              if (!_isLoading &&
+                  _errorMessage.isEmpty &&
+                  _filteredNearbyUsers.isNotEmpty)
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(16.0, 24.0, 16.0, 12.0),
                   sliver: SliverToBoxAdapter(
@@ -410,7 +533,7 @@ class _AddFriendPageState extends State<AddFriendPage> {
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          '(${_nearbyUsers.length})',
+                          '(${_filteredNearbyUsers.length})',
                           style: const TextStyle(
                             color: Colors.grey,
                             fontSize: 16,
@@ -434,27 +557,21 @@ class _AddFriendPageState extends State<AddFriendPage> {
                 ),
 
               // Empty State
-              if (!_isLoading && _errorMessage.isEmpty && _nearbyUsers.isEmpty)
+              if (!_isLoading && _errorMessage.isEmpty && _filteredNearbyUsers.isEmpty)
                 SliverFillRemaining(
-                  child: const Center(
-                    child: Text(
-                      'No nearby users found',
-                      style: TextStyle(
-                        color: Colors.grey,
-                        fontSize: 16,
-                      ),
-                    ),
-                  ),
+                  child: _buildEmptyState(),
                 ),
 
               // Discover Nearby People Section
-              if (!_isLoading && _errorMessage.isEmpty && _nearbyUsers.isNotEmpty)
+              if (!_isLoading &&
+                  _errorMessage.isEmpty &&
+                  _filteredNearbyUsers.isNotEmpty)
                 SliverPadding(
                   padding: const EdgeInsets.symmetric(horizontal: 16.0),
                   sliver: SliverList(
                     delegate: SliverChildBuilderDelegate(
                       (context, index) {
-                        final user = _nearbyUsers[index];
+                        final user = _filteredNearbyUsers[index];
                         final isSelected = _selectedIndices.contains(index);
 
                         return _buildNearbyPersonItem(
@@ -463,7 +580,7 @@ class _AddFriendPageState extends State<AddFriendPage> {
                           onTap: () => _toggleSelection(index),
                         );
                       },
-                      childCount: _nearbyUsers.length,
+                      childCount: _filteredNearbyUsers.length,
                     ),
                   ),
                 ),

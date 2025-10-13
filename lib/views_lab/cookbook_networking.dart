@@ -1,11 +1,23 @@
-// import 'package:http/http.dart' as http;
-// import 'dart:async';
-// import 'dart:convert';
-// import 'package:flutter/material.dart';
-// import 'dart:io';
+import 'package:http/http.dart' as http;
+import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'dart:io';
 
-// // Future is a core Dart class for working with async operations.
-// // connect to servers using WebSockets. WebSockets allow for two-way communication with a server without polling.
+// Future is a core Dart class for working with async operations.
+// Single-value asynchronous operation
+// Represents a value that will be available at some point
+// Can complete with a value or an error
+// One-time emission - once it delivers the value, it's done
+
+// What is a factory ?
+// A factory constructor is a special constructor that:
+// Doesn't always create a new instance
+// Can return an existing instance or a subclass instance
+// Can contain logic before returning an object
+// Is useful for JSON parsing, caching, etc.
+
+// connect to servers using WebSockets. WebSockets allow for two-way communication with a server without polling.
 
 // Future<Album> fetchAlbum() async {
 //   final response = await http.get(
@@ -74,14 +86,14 @@
 // }
 
 // class _MyAppState extends State<MyApp> {
-//   // late Future<Album> _futureAlbum;
+//   //late Future<Album> _futureAlbum;
 //   Future<Album>? _futureAlbum;
 //   final TextEditingController _controller = TextEditingController();
 
 //   @override
 //   void initState() {
 //     super.initState();
-//     // futureAlbum = fetchAlbum();
+//     _futureAlbum = fetchAlbum();
 //   }
 
 //   FutureBuilder<Album> buildFutureBuilder() {
@@ -171,7 +183,10 @@
 //   @override
 //   Widget build(BuildContext context) {
 //     const title = 'WebSocket Demo';
-//     return const MaterialApp(title: title, home: MyHomePage(title: title));
+//     return const MaterialApp(
+//       title: title,
+//       home: MyHomePage(title: title),
+//     );
 //   }
 // }
 
@@ -186,7 +201,6 @@
 
 // class _MyHomePageState extends State<MyHomePage> {
 //   final TextEditingController _controller = TextEditingController();
-//   // ##
 //   final _channel = WebSocketChannel.connect(
 //     Uri.parse('wss://echo.websocket.events'),
 //   );
@@ -226,14 +240,12 @@
 
 //   void _sendMessage() {
 //     if (_controller.text.isNotEmpty) {
-//       // ##
 //       _channel.sink.add(_controller.text);
 //     }
 //   }
 
 //   @override
 //   void dispose() {
-//     // ##
 //     _channel.sink.close();
 //     _controller.dispose();
 //     super.dispose();
@@ -255,7 +267,6 @@
 //   );
 
 //   // Use the compute function to run parsePhotos in a separate isolate.
-//   // ##
 //   return compute(parsePhotos, response.body);
 // }
 

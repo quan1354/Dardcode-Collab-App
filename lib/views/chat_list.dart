@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:darkord/consts/color.dart';
 import 'package:darkord/api/auth_api.dart';
 import 'package:darkord/views/profile.dart';
-import 'package:darkord/views/add_friend_page.dart'; // Add this import
+import 'package:darkord/views/add_friend_page.dart';
 import 'dart:convert';
 
 class ChatList extends StatefulWidget {
@@ -24,24 +24,68 @@ class _ChatListState extends State<ChatList> {
   String _currentStatus = 'online';
   Map<String, dynamic>? _userData;
   final authApi = AuthApi();
+  List<dynamic> _friendsList = [];
+  List<dynamic> _filteredFriendsList = [];
+  bool _isLoadingFriends = true;
+  Map<String, dynamic> _userDetailsCache = {};
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
 
   @override
   void initState() {
     super.initState();
     if (widget.loginPayload != null) {
-      _extractUserData(widget.loginPayload!);
+      _extractChat(widget.loginPayload!);
+    } else if (widget.accessToken.isNotEmpty) {
+      // If we already have access token, fetch user data directly
+      _fetchUserDataWithToken(widget.accessToken);
     }
   }
 
-  void _extractUserData(Map<String, dynamic> payload) {
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _fetchUserDataWithToken(String accessToken) async {
+    try {
+      // Decode token to get user ID
+      final List<String> parts = accessToken.split('.');
+      final String payloadBase64 = parts[1];
+      String paddedPayload = payloadBase64;
+      while (paddedPayload.length % 4 != 0) {
+        paddedPayload += '=';
+      }
+      final String decodedJson = utf8.decode(base64Url.decode(paddedPayload));
+      final Map<String, dynamic> tokenData = json.decode(decodedJson);
+
+      final user = await authApi.fetchSingleUser(accessToken, tokenData['sub']);
+      setState(() {
+        _userData = {
+          'user_id': user.userId,
+          'username': user.username,
+          'email_addr': user.emailAddr,
+          'status': user.status,
+          'about_me': user.aboutMe,
+          'avatar_url': user.avatarUrl,
+        };
+      });
+
+      // Fetch friends after user data is loaded
+      _fetchFriends(accessToken, user.userId.toString());
+    } catch (error) {
+      print('Error fetching user data with token: $error');
+      setState(() {
+        _isLoadingFriends = false;
+      });
+    }
+  }
+
+  void _extractChat(Map<String, dynamic> payload) {
     try {
       final String accessToken = payload['payload']['access_token'];
       final List<String> parts = accessToken.split('.');
-
-      if (parts.length != 3) {
-        print('Invalid JWT token');
-        return;
-      }
 
       final String payloadBase64 = parts[1];
       String paddedPayload = payloadBase64;
@@ -62,7 +106,7 @@ class _ChatListState extends State<ChatList> {
 
       print(tokenData);
 
-      authApi.fetchUser(accessToken, tokenData['sub']).then((user) {
+      authApi.fetchSingleUser(accessToken, tokenData['sub']).then((user) {
         setState(() {
           _userData = {
             'user_id': user.userId,
@@ -74,12 +118,318 @@ class _ChatListState extends State<ChatList> {
           };
           print(_userData);
         });
+
+        // Fetch friends after user data is loaded
+        _fetchFriends(accessToken, user.userId.toString());
       }).catchError((error) {
         print('Error fetching user data: $error');
       });
     } catch (e) {
       print('Error decoding JWT: $e');
     }
+  }
+
+  void _fetchFriends(String accessToken, String userId) async {
+    try {
+      setState(() {
+        _isLoadingFriends = true;
+      });
+
+      print('Fetching friends for user: $userId with token: $accessToken');
+
+      final friendsResponse = await authApi.fetchUsers(accessToken, userId);
+      print('Fetch Users Response: $friendsResponse');
+
+      List<dynamic> results = [];
+
+      // Fixed: Handle different response structures
+      if (friendsResponse['data'] != null &&
+          friendsResponse['data']['payload'] != null &&
+          friendsResponse['data']['payload']['results'] is List) {
+        results = friendsResponse['data']['payload']['results'];
+      }
+      // Alternative path: check if response has payload directly
+      else if (friendsResponse['payload'] != null &&
+          friendsResponse['payload']['results'] is List) {
+        results = friendsResponse['payload']['results'];
+      }
+      // Another alternative: check if response has results directly
+      else if (friendsResponse['results'] is List) {
+        results = friendsResponse['results'];
+      } else {
+        print('No results found in response structure');
+        print('Available keys: ${friendsResponse.keys}');
+        results = [];
+      }
+
+      print('Extracted results: $results');
+      print('Results length: ${results.length}');
+
+      setState(() {
+        _friendsList = results;
+        _filteredFriendsList = results; // Initialize filtered list
+        _isLoadingFriends = false;
+      });
+
+      // Fetch user details for each friend
+      for (var friend in results) {
+        final friendUserId = friend['user_id'].toString();
+        print('Processing friend: $friendUserId');
+
+        if (!_userDetailsCache.containsKey(friendUserId)) {
+          try {
+            final userDetails =
+                await authApi.fetchSingleUser(accessToken, friendUserId);
+            setState(() {
+              _userDetailsCache[friendUserId] = {
+                'username': userDetails.username ?? 'Unknown User',
+                'avatar_url': userDetails.avatarUrl,
+                'status': userDetails.status,
+              };
+            });
+            print(
+                'Fetched user details for $friendUserId: ${userDetails.username}');
+          } catch (e) {
+            print('Error fetching user details for $friendUserId: $e');
+            setState(() {
+              _userDetailsCache[friendUserId] = {
+                'username': 'User $friendUserId',
+                'avatar_url': null,
+                'status': null,
+              };
+            });
+          }
+        }
+      }
+    } catch (error) {
+      print('Error fetching friends: $error');
+      setState(() {
+        _isLoadingFriends = false;
+      });
+    }
+  }
+
+  void _filterChats(String query) {
+    setState(() {
+      _searchQuery = query.toLowerCase().trim();
+      
+      if (_searchQuery.isEmpty) {
+        _filteredFriendsList = _friendsList;
+      } else {
+        _filteredFriendsList = _friendsList.where((friend) {
+          final friendUserId = friend['user_id'].toString();
+          final userDetails = _userDetailsCache[friendUserId];
+          final username = userDetails?['username']?.toLowerCase() ?? '';
+          final lastMessage = _getLastMessage(friend['last_message']).toLowerCase();
+          
+          // Search by username or last message
+          return username.contains(_searchQuery) || 
+                 lastMessage.contains(_searchQuery) ||
+                 friendUserId.contains(_searchQuery);
+        }).toList();
+      }
+    });
+  }
+
+  String _formatLastChatTime(dynamic lastChatAt) {
+    if (lastChatAt == null || lastChatAt == 0) {
+      return '00:00';
+    }
+
+    try {
+      // Handle the timestamp (assuming it's in milliseconds)
+      final timestamp = int.tryParse(lastChatAt.toString());
+      if (timestamp == null || timestamp <= 0) {
+        return '00:00';
+      }
+
+      // Check if it's the invalid timestamp you mentioned
+      if (timestamp == 9999999999999) {
+        return '00:00';
+      }
+
+      final date = DateTime.fromMillisecondsSinceEpoch(timestamp);
+      final now = DateTime.now();
+
+      // If same day, show time, otherwise show date
+      if (date.year == now.year &&
+          date.month == now.month &&
+          date.day == now.day) {
+        return '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+      } else {
+        return '${date.month}/${date.day}';
+      }
+    } catch (e) {
+      print('Error formatting time: $e');
+      return '00:00';
+    }
+  }
+
+  String _getLastMessage(dynamic lastMessage) {
+    if (lastMessage == null || lastMessage.toString().isEmpty) {
+      return 'No messages yet';
+    }
+    return lastMessage.toString();
+  }
+
+  Widget _buildChatListItem(Map<String, dynamic> friend) {
+    final friendUserId = friend['user_id'].toString();
+    final userDetails = _userDetailsCache[friendUserId];
+    final username = userDetails?['username'] ?? 'User $friendUserId';
+    final avatarUrl = userDetails?['avatar_url'];
+    final lastMessage = _getLastMessage(friend['last_message']);
+    final lastChatTime = _formatLastChatTime(friend['last_chat_at']);
+
+    return ListTile(
+      leading: GestureDetector(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => UserProfilePage(
+                userId: friendUserId,
+                accessToken: widget.accessToken,
+              ),
+            ),
+          );
+        },
+        child: CircleAvatar(
+          backgroundColor: Colors.grey,
+          backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
+          child: avatarUrl == null
+              ? const Icon(Icons.person, color: Colors.white)
+              : null,
+        ),
+      ),
+      title: Text(
+        username,
+        style: const TextStyle(color: Colors.white),
+      ),
+      subtitle: Text(
+        lastMessage,
+        style: const TextStyle(color: Colors.grey),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      trailing: Text(
+        lastChatTime,
+        style: const TextStyle(color: Colors.grey, fontSize: 12),
+      ),
+      onTap: () {
+        // TODO: Navigate to chat with this friend
+        print('Open chat with $username ($friendUserId)');
+      },
+    );
+  }
+
+  Widget _buildLoadingIndicator() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CircularProgressIndicator(
+            color: Colors.blue,
+          ),
+          SizedBox(height: 16),
+          Text(
+            'Loading chats...',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+            ),
+          ),
+          SizedBox(height: 8),
+          TextButton(
+            onPressed: () {
+              setState(() {
+                _isLoadingFriends = false; // Manual fallback
+              });
+            },
+            child: Text(
+              'Take too long? Tap here',
+              style: TextStyle(
+                color: Colors.blue,
+                fontSize: 12,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(
+            Icons.chat_bubble_outline,
+            color: Colors.grey,
+            size: 64,
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'No chats yet',
+            style: TextStyle(
+              color: Colors.grey,
+              fontSize: 18,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Add friends to start chatting',
+            style: TextStyle(
+              color: Colors.grey[600],
+              fontSize: 14,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(
+            Icons.search_off,
+            color: Colors.grey,
+            size: 64,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'No results for "$_searchQuery"',
+            style: const TextStyle(
+              color: Colors.grey,
+              fontSize: 18,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Try searching with different keywords',
+            style: TextStyle(
+              color: Colors.grey[600],
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: () {
+              _searchController.clear();
+              _filterChats('');
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue[800],
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Clear Search'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _navigateToAddFriend() {
@@ -89,9 +439,16 @@ class _ChatListState extends State<ChatList> {
         builder: (context) => AddFriendPage(
           accessToken: widget.accessToken,
           userData: _userData,
+          currentFriends: _friendsList, // Pass current friends list
         ),
       ),
-    );
+    ).then((_) {
+      // Refresh friends list when returning from AddFriendPage
+      if (_userData != null && _userData!['user_id'] != null) {
+        print('Refreshing friends list after returning from AddFriendPage');
+        _fetchFriends(widget.accessToken, _userData!['user_id'].toString());
+      }
+    });
   }
 
   @override
@@ -101,7 +458,7 @@ class _ChatListState extends State<ChatList> {
       drawer: _buildUserDrawer(),
       floatingActionButton: FloatingActionButton(
         onPressed: _navigateToAddFriend,
-        backgroundColor: Colors.blue[900], // Dark blue color
+        backgroundColor: Colors.blue[900],
         foregroundColor: Colors.white,
         child: const Icon(Icons.add, size: 30),
       ),
@@ -141,63 +498,64 @@ class _ChatListState extends State<ChatList> {
                   color: Colors.grey[900],
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const TextField(
-                  style: TextStyle(color: Colors.white),
-                  decoration: InputDecoration(
-                    prefixIcon: Icon(Icons.search, color: Colors.grey),
-                    hintText: 'Search messages...',
-                    hintStyle: TextStyle(color: Colors.grey),
-                    border: InputBorder.none,
-                    contentPadding: EdgeInsets.symmetric(vertical: 15),
-                  ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _searchController,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(
+                          prefixIcon: Icon(Icons.search, color: Colors.grey),
+                          hintText: 'Search messages...',
+                          hintStyle: TextStyle(color: Colors.grey),
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+                        ),
+                        onChanged: _filterChats,
+                      ),
+                    ),
+                    if (_searchQuery.isNotEmpty)
+                      IconButton(
+                        icon: const Icon(Icons.clear, color: Colors.grey),
+                        onPressed: () {
+                          _searchController.clear();
+                          _filterChats('');
+                        },
+                      ),
+                  ],
                 ),
               ),
             ),
           ),
-          SliverList(
-            delegate: SliverChildBuilderDelegate(
-              (context, index) {
-                return ListTile(
-                  leading: GestureDetector(
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => UserProfilePage(
-                            userId: '10000020',
-                            accessToken: widget.accessToken,
-                          ),
-                        ),
-                      );
-                    },
-                    child: const CircleAvatar(
-                      backgroundColor: Colors.grey,
-                      child: Icon(Icons.person, color: Colors.white),
-                    ),
-                  ),
-                  title: const Text(
-                    'Jing Quan',
-                    style: TextStyle(color: Colors.white),
-                  ),
-                  subtitle: const Text(
-                    'Hello there!',
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                  trailing: const Text(
-                    '1:30',
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                );
-              },
-              childCount: 1,
+
+          // Friends List Section
+          if (_isLoadingFriends)
+            SliverFillRemaining(
+              child: _buildLoadingIndicator(),
+            )
+          else if (_friendsList.isEmpty)
+            SliverFillRemaining(
+              child: _buildEmptyState(),
+            )
+          else if (_filteredFriendsList.isEmpty && _searchQuery.isNotEmpty)
+            SliverFillRemaining(
+              child: _buildSearchEmptyState(),
+            )
+          else
+            SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final friend = _filteredFriendsList[index];
+                  return _buildChatListItem(friend);
+                },
+                childCount: _filteredFriendsList.length,
+              ),
             ),
-          ),
         ],
       ),
     );
   }
 
-  // ... rest of your existing _buildUserDrawer() and other methods remain the same
   Widget _buildUserDrawer() {
     return Drawer(
       backgroundColor: Colors.grey[900],
@@ -214,11 +572,16 @@ class _ChatListState extends State<ChatList> {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const CircleAvatar(
+                      CircleAvatar(
                         radius: 30,
                         backgroundColor: Colors.grey,
-                        child:
-                            Icon(Icons.person, size: 40, color: Colors.white),
+                        backgroundImage: _userData?['avatar_url'] != null
+                            ? NetworkImage(_userData!['avatar_url'])
+                            : null,
+                        child: _userData?['avatar_url'] == null
+                            ? const Icon(Icons.person,
+                                size: 40, color: Colors.white)
+                            : null,
                       ),
                       const SizedBox(width: 16),
                       Expanded(
