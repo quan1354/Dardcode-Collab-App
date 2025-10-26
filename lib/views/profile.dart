@@ -29,7 +29,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
   }
 
   Future<User> _fetchUserData() async {
-    return await authApi.fetchSingleUser(widget.accessToken, widget.userId);
+    return await authApi.fetchUsers(widget.accessToken, widget.userId);
   }
 
   @override

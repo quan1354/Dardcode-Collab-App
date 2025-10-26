@@ -3,6 +3,10 @@ import 'dart:convert';
 import 'package:darkord/models/user.dart';
 import 'package:http/http.dart' as http;
 import '../models/auth_response.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:web_socket_channel/io.dart';
+import 'dart:convert';
+import 'dart:async';
 
 class AuthApi {
   static const String _baseUrl = 'https://d3v904dal0xey8.cloudfront.net';
@@ -11,6 +15,11 @@ class AuthApi {
 
   String? get accessToken => _accessToken;
   String? get refreshToken => _refreshToken;
+
+  WebSocketChannel? _webSocketChannel;
+  WebSocketChannel? get webSocketChannel => _webSocketChannel;
+  Timer? _typingTimer;
+  bool _isTyping = false;
 
   Future<Map<String, dynamic>> login(String email, String password) async {
     try {
@@ -400,39 +409,6 @@ class AuthApi {
     }
   }
 
-  Future<User> fetchSingleUser(String accessToken, String userId) async {
-    try {
-      final uri = Uri.parse('$_baseUrl/user/list').replace(queryParameters: {
-        'user_ids': userId,
-      });
-
-      final response = await http.get(
-        uri,
-        headers: {
-          'Authorization': accessToken,
-        },
-      );
-
-      if (response.statusCode == 200) {
-        final responseData = jsonDecode(response.body) as Map<String, dynamic>;
-        print(responseData);
-
-        if (responseData['payload'] != null &&
-            responseData['payload']['results'] != null &&
-            (responseData['payload']['results'] as List).isNotEmpty) {
-          final userData = responseData['payload']['results'][0];
-          return User.fromJson(userData);
-        } else {
-          throw Exception('No user data found');
-        }
-      } else {
-        throw Exception('Failed to fetch user: ${response.statusCode}');
-      }
-    } catch (e) {
-      throw Exception('Error fetching user: $e');
-    }
-  }
-
   Future<List<User>> findNearbyUsers(String accessToken) async {
     try {
       final uri = Uri.parse('$_baseUrl/user/list');
@@ -463,9 +439,9 @@ class AuthApi {
     }
   }
 
-  Future<Map<String, dynamic>> addUsers(String accessToken, String user_id, List<String> other_user_ids)async{
+  Future<Map<String, dynamic>> addUsers(
+      String accessToken, String user_id, List<String> other_user_ids) async {
     try {
-      print('TTTTTTTTTTTTTTTTTTTTTTTT: $accessToken');
       final addUsersUrl = Uri.parse('$_baseUrl/chat/$user_id/list');
 
       final response = await http.post(
@@ -490,35 +466,195 @@ class AuthApi {
     }
   }
 
-  Future<Map<String, dynamic>> fetchUsers(String accessToken, String user_id) async {
-  try {
-    final fetchUsersUrl = Uri.parse('$_baseUrl/chat/$user_id/list');
+  // Enhanced version that can handle both single and multiple users
+  Future<dynamic> fetchUsers(String accessToken, String userIds,
+      {bool returnList = false}) async {
+    try {
+      final uri = Uri.parse('$_baseUrl/user/list').replace(queryParameters: {
+        'user_ids': userIds,
+      });
 
-    final response = await http.get(
-      fetchUsersUrl,
-      headers: {
-        'Authorization': accessToken,
-        'Content-Type': 'application/json',
-      },
-    );
+      final response = await http.get(
+        uri,
+        headers: {
+          'Authorization': accessToken,
+        },
+      );
 
-    final responseData = jsonDecode(response.body) as Map<String, dynamic>;
-    print('Fetch Users successfully: $responseData');
+      if (response.statusCode == 200) {
+        final responseData = jsonDecode(response.body) as Map<String, dynamic>;
+        print(responseData);
 
-    if (response.statusCode != 200) {
-      throw Exception('Fetch Users failed: ${responseData['message']}');
+        if (responseData['payload'] != null &&
+            responseData['payload']['results'] != null &&
+            (responseData['payload']['results'] as List).isNotEmpty) {
+          final results = responseData['payload']['results'] as List<dynamic>;
+
+          if (returnList) {
+            // Return the entire list for batch operations
+            return results;
+          } else {
+            // Return single user (for backward compatibility)
+            return User.fromJson(results[0]);
+          }
+        } else {
+          throw Exception('No user data found');
+        }
+      } else {
+        throw Exception('Failed to fetch user: ${response.statusCode}');
+      }
+    } catch (e) {
+      throw Exception('Error fetching user: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>> fetchChatUsers(
+      String accessToken, String user_id) async {
+    try {
+      final fetchUsersUrl = Uri.parse('$_baseUrl/chat/$user_id/list');
+
+      final response = await http.get(
+        fetchUsersUrl,
+        headers: {
+          'Authorization': accessToken,
+          'Content-Type': 'application/json',
+        },
+      );
+
+      final responseData = jsonDecode(response.body) as Map<String, dynamic>;
+      print('Fetch Users successfully: $responseData');
+
+      if (response.statusCode != 200) {
+        throw Exception('Fetch Users failed: ${responseData['message']}');
+      }
+
+      // Return both success and the actual data
+      return {
+        'success': true,
+        'message': 'Fetch Users successfully',
+        'data': responseData // Include the actual data
+      };
+    } catch (e) {
+      throw Exception('Fetch Users error: $e');
+    }
+  }
+
+  Future<String> getWebSocketToken(accessToken) async {
+    try {
+      if (accessToken == null) {
+        throw Exception('No access token available. Please login first.');
+      }
+
+      print(
+          'Fetching WebSocket token with access token: ${accessToken!.substring(0, 20)}...');
+
+      final response = await http.post(
+        Uri.parse('https://d3v904dal0xey8.cloudfront.net/chat/ws_token'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': accessToken!,
+        },
+      );
+
+      final responseData = jsonDecode(response.body);
+      print('WebSocket token response: $responseData');
+
+      if (response.statusCode != 200) {
+        throw Exception(
+            responseData['message'] ?? 'Failed to get WebSocket token');
+      }
+
+      final wsToken = responseData['payload']['ws_token'];
+      print('WebSocket token received: ${wsToken.substring(0, 20)}...');
+
+      return wsToken;
+    } catch (e) {
+      throw Exception('WebSocket token error: ${e.toString()}');
+    }
+  }
+
+  Future<WebSocketChannel> connectToWebSocket(String accessToken) async {
+    try {
+      // Get WebSocket token first
+      final wsToken = await getWebSocketToken(accessToken);
+
+      // Connect to WebSocket
+      final channel = IOWebSocketChannel.connect(
+        'wss://srqaesich3.execute-api.us-east-1.amazonaws.com/stage?token=$wsToken',
+      );
+
+      _webSocketChannel = channel;
+      return channel;
+    } catch (e) {
+      throw Exception('WebSocket connection failed: $e');
+    }
+  }
+
+  void sendMessage(String accessToken, String message, String otherUserId) {
+    if (_webSocketChannel == null) {
+      throw Exception('WebSocket not connected');
     }
 
-    // Return both success and the actual data
-    return {
-      'success': true,
-      'message': 'Fetch Users successfully',
-      'data': responseData // Include the actual data
+    final messageData = {
+      "action": "send_message",
+      "event": {
+        "message": message,
+      },
+      "other_user_id": otherUserId,
     };
-    
-  } catch (e) {
-    throw Exception('Fetch Users error: $e');
-  }
-}
 
+    final jsonMessage = jsonEncode(messageData);
+    _webSocketChannel!.sink.add(jsonMessage);
+  }
+
+  void startTyping(String accessToken, String otherUserId) {
+    if (_webSocketChannel == null) {
+      throw Exception('WebSocket not connected');
+    }
+
+    // Cancel any existing timer
+    _typingTimer?.cancel();
+
+    // Send typing event immediately if not already typing
+    if (!_isTyping) {
+      _sendTypingEvent(otherUserId);
+      _isTyping = true;
+    }
+
+    // Set up timer to stop typing after 2 seconds of inactivity
+    _typingTimer = Timer(const Duration(seconds: 2), () {
+      _stopTyping(otherUserId);
+    });
+  }
+
+  void _sendTypingEvent(String otherUserId) {
+    final typingData = {
+      "action": "send_message",
+      "event": "typing",
+      "other_user_id": otherUserId,
+    };
+
+    final jsonMessage = jsonEncode(typingData);
+    _webSocketChannel!.sink.add(jsonMessage);
+    print('Typing event sent to $otherUserId');
+  }
+
+  void _stopTyping(String otherUserId) {
+    _isTyping = false;
+    _typingTimer?.cancel();
+    print('Typing stopped for $otherUserId');
+  }
+
+  // Call this when user sends a message or explicitly stops typing
+  void stopTyping() {
+    _isTyping = false;
+    _typingTimer?.cancel();
+  }
+
+  void disconnectWebSocket() {
+    _typingTimer?.cancel();
+    _isTyping = false;
+    _webSocketChannel?.sink.close();
+    _webSocketChannel = null;
+  }
 }

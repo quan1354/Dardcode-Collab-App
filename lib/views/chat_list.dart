@@ -5,6 +5,7 @@ import 'package:darkord/api/auth_api.dart';
 import 'package:darkord/views/profile.dart';
 import 'package:darkord/views/add_friend_page.dart';
 import 'dart:convert';
+import 'package:darkord/views/messaging_page.dart';
 
 class ChatList extends StatefulWidget {
   final String accessToken;
@@ -30,6 +31,10 @@ class _ChatListState extends State<ChatList> {
   Map<String, dynamic> _userDetailsCache = {};
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
+  int _currentIndex = 0; // For bottom navigation
+
+  // Bottom navigation pages
+  final List<Widget> _pages = [];
 
   @override
   void initState() {
@@ -60,7 +65,7 @@ class _ChatListState extends State<ChatList> {
       final String decodedJson = utf8.decode(base64Url.decode(paddedPayload));
       final Map<String, dynamic> tokenData = json.decode(decodedJson);
 
-      final user = await authApi.fetchSingleUser(accessToken, tokenData['sub']);
+      final user = await authApi.fetchUsers(accessToken, tokenData['sub']);
       setState(() {
         _userData = {
           'user_id': user.userId,
@@ -106,7 +111,7 @@ class _ChatListState extends State<ChatList> {
 
       print(tokenData);
 
-      authApi.fetchSingleUser(accessToken, tokenData['sub']).then((user) {
+      authApi.fetchUsers(accessToken, tokenData['sub']).then((user) {
         setState(() {
           _userData = {
             'user_id': user.userId,
@@ -137,7 +142,7 @@ class _ChatListState extends State<ChatList> {
 
       print('Fetching friends for user: $userId with token: $accessToken');
 
-      final friendsResponse = await authApi.fetchUsers(accessToken, userId);
+      final friendsResponse = await authApi.fetchChatUsers(accessToken, userId);
       print('Fetch Users Response: $friendsResponse');
 
       List<dynamic> results = [];
@@ -165,42 +170,24 @@ class _ChatListState extends State<ChatList> {
       print('Extracted results: $results');
       print('Results length: ${results.length}');
 
+      // Extract all friend user IDs for batch fetching
+      final friendUserIds = results
+          .map<String>((friend) => friend['user_id'].toString())
+          .where((id) => id.isNotEmpty)
+          .toList();
+
+      print('Friend user IDs to fetch: $friendUserIds');
+
+      if (friendUserIds.isNotEmpty) {
+        // Fetch all user details in a single batch request
+        await _fetchUserDetailsBatch(accessToken, friendUserIds);
+      }
+
       setState(() {
         _friendsList = results;
         _filteredFriendsList = results; // Initialize filtered list
         _isLoadingFriends = false;
       });
-
-      // Fetch user details for each friend
-      for (var friend in results) {
-        final friendUserId = friend['user_id'].toString();
-        print('Processing friend: $friendUserId');
-
-        if (!_userDetailsCache.containsKey(friendUserId)) {
-          try {
-            final userDetails =
-                await authApi.fetchSingleUser(accessToken, friendUserId);
-            setState(() {
-              _userDetailsCache[friendUserId] = {
-                'username': userDetails.username ?? 'Unknown User',
-                'avatar_url': userDetails.avatarUrl,
-                'status': userDetails.status,
-              };
-            });
-            print(
-                'Fetched user details for $friendUserId: ${userDetails.username}');
-          } catch (e) {
-            print('Error fetching user details for $friendUserId: $e');
-            setState(() {
-              _userDetailsCache[friendUserId] = {
-                'username': 'User $friendUserId',
-                'avatar_url': null,
-                'status': null,
-              };
-            });
-          }
-        }
-      }
     } catch (error) {
       print('Error fetching friends: $error');
       setState(() {
@@ -209,10 +196,71 @@ class _ChatListState extends State<ChatList> {
     }
   }
 
+  Future<void> _fetchUserDetailsBatch(
+      String accessToken, List<String> userIds) async {
+    try {
+      if (userIds.isEmpty) return;
+
+      // Join all user IDs with commas for the batch request
+      final userIdsString = userIds.join(',');
+      print('Batch fetching user details for IDs: $userIdsString');
+
+      final batchUserDetails = await authApi
+          .fetchUsers(accessToken, userIdsString, returnList: true);
+
+      // Process the batch response and update cache
+      for (var userData in batchUserDetails) {
+        final userId = userData['identity']['user_id'].toString();
+        setState(() {
+          _userDetailsCache[userId] = {
+            'username': userData['identity']['username'] ?? 'Unknown User',
+            'avatar_url': userData['identity']['avatar_url'],
+            'status': userData['status']['status'],
+          };
+        });
+        print(
+            'Cached user details for $userId: ${userData['identity']['username']}');
+      }
+    } catch (e) {
+      print('Error in batch user details fetch: $e');
+      // Fallback: try individual requests if batch fails
+      await _fetchUserDetailsIndividualFallback(accessToken, userIds);
+    }
+  }
+
+  Future<void> _fetchUserDetailsIndividualFallback(
+      String accessToken, List<String> userIds) async {
+    // Fallback to individual requests if batch fails
+    for (var userId in userIds) {
+      if (!_userDetailsCache.containsKey(userId)) {
+        try {
+          final userDetails = await authApi.fetchUsers(accessToken, userId);
+          setState(() {
+            _userDetailsCache[userId] = {
+              'username': userDetails.username ?? 'Unknown User',
+              'avatar_url': userDetails.avatarUrl,
+              'status': userDetails.status,
+            };
+          });
+          print('Fetched user details for $userId: ${userDetails.username}');
+        } catch (e) {
+          print('Error fetching user details for $userId: $e');
+          setState(() {
+            _userDetailsCache[userId] = {
+              'username': 'User $userId',
+              'avatar_url': null,
+              'status': null,
+            };
+          });
+        }
+      }
+    }
+  }
+
   void _filterChats(String query) {
     setState(() {
       _searchQuery = query.toLowerCase().trim();
-      
+
       if (_searchQuery.isEmpty) {
         _filteredFriendsList = _friendsList;
       } else {
@@ -220,12 +268,13 @@ class _ChatListState extends State<ChatList> {
           final friendUserId = friend['user_id'].toString();
           final userDetails = _userDetailsCache[friendUserId];
           final username = userDetails?['username']?.toLowerCase() ?? '';
-          final lastMessage = _getLastMessage(friend['last_message']).toLowerCase();
-          
+          final lastMessage =
+              _getLastMessage(friend['last_message']).toLowerCase();
+
           // Search by username or last message
-          return username.contains(_searchQuery) || 
-                 lastMessage.contains(_searchQuery) ||
-                 friendUserId.contains(_searchQuery);
+          return username.contains(_searchQuery) ||
+              lastMessage.contains(_searchQuery) ||
+              friendUserId.contains(_searchQuery);
         }).toList();
       }
     });
@@ -273,10 +322,12 @@ class _ChatListState extends State<ChatList> {
   }
 
   Widget _buildChatListItem(Map<String, dynamic> friend) {
+    print(_userDetailsCache);
     final friendUserId = friend['user_id'].toString();
     final userDetails = _userDetailsCache[friendUserId];
     final username = userDetails?['username'] ?? 'User $friendUserId';
     final avatarUrl = userDetails?['avatar_url'];
+    final status = userDetails?['status'];
     final lastMessage = _getLastMessage(friend['last_message']);
     final lastChatTime = _formatLastChatTime(friend['last_chat_at']);
 
@@ -316,8 +367,19 @@ class _ChatListState extends State<ChatList> {
         style: const TextStyle(color: Colors.grey, fontSize: 12),
       ),
       onTap: () {
-        // TODO: Navigate to chat with this friend
-        print('Open chat with $username ($friendUserId)');
+        // Navigate to messaging page when clicking on a friend
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => MessagingPage(
+              accessToken: widget.accessToken,
+              friendId: friendUserId,
+              friendUsername: username,
+              friendAvatarUrl: avatarUrl,
+              friendStatus: status,
+            ),
+          ),
+        );
       },
     );
   }
@@ -451,106 +513,266 @@ class _ChatListState extends State<ChatList> {
     });
   }
 
-  @override
-  Widget build(BuildContext context) {
+  // Community Page (Placeholder)
+  Widget _buildCommunityPage() {
     return Scaffold(
       backgroundColor: mainBGColor,
-      drawer: _buildUserDrawer(),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _navigateToAddFriend,
-        backgroundColor: Colors.blue[900],
-        foregroundColor: Colors.white,
-        child: const Icon(Icons.add, size: 30),
-      ),
-      body: CustomScrollView(
-        slivers: [
-          SliverAppBar(
-            pinned: true,
-            floating: false,
-            snap: false,
-            elevation: 4,
-            shadowColor: Color.lerp(Colors.transparent, Colors.black, 0.3),
-            surfaceTintColor: Colors.transparent,
-            backgroundColor: mainBGColor,
-            title: const Text(
-              'Messages',
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.people,
+              color: Colors.grey,
+              size: 64,
+            ),
+            SizedBox(height: 16),
+            Text(
+              'Community',
               style: TextStyle(
                 color: Colors.white,
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
               ),
             ),
-            leading: Builder(
-              builder: (context) => IconButton(
-                icon: const Icon(Icons.menu, color: Colors.white),
-                onPressed: () {
-                  Scaffold.of(context).openDrawer();
-                },
+            SizedBox(height: 8),
+            Text(
+              'Community features coming soon',
+              style: TextStyle(
+                color: Colors.grey,
+                fontSize: 16,
               ),
             ),
-          ),
-          SliverPadding(
-            padding: const EdgeInsets.all(16.0),
-            sliver: SliverToBoxAdapter(
-              child: Container(
-                height: 50,
-                decoration: BoxDecoration(
-                  color: Colors.grey[900],
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _searchController,
-                        style: const TextStyle(color: Colors.white),
-                        decoration: const InputDecoration(
-                          prefixIcon: Icon(Icons.search, color: Colors.grey),
-                          hintText: 'Search messages...',
-                          hintStyle: TextStyle(color: Colors.grey),
-                          border: InputBorder.none,
-                          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 15),
-                        ),
-                        onChanged: _filterChats,
-                      ),
-                    ),
-                    if (_searchQuery.isNotEmpty)
-                      IconButton(
-                        icon: const Icon(Icons.clear, color: Colors.grey),
-                        onPressed: () {
-                          _searchController.clear();
-                          _filterChats('');
-                        },
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          ),
+          ],
+        ),
+      ),
+    );
+  }
 
-          // Friends List Section
-          if (_isLoadingFriends)
-            SliverFillRemaining(
-              child: _buildLoadingIndicator(),
-            )
-          else if (_friendsList.isEmpty)
-            SliverFillRemaining(
-              child: _buildEmptyState(),
-            )
-          else if (_filteredFriendsList.isEmpty && _searchQuery.isNotEmpty)
-            SliverFillRemaining(
-              child: _buildSearchEmptyState(),
-            )
-          else
-            SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  final friend = _filteredFriendsList[index];
-                  return _buildChatListItem(friend);
-                },
-                childCount: _filteredFriendsList.length,
+  // Settings Page (Placeholder)
+  Widget _buildSettingsPage() {
+    return Scaffold(
+      backgroundColor: mainBGColor,
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.settings,
+              color: Colors.grey,
+              size: 64,
+            ),
+            SizedBox(height: 16),
+            Text(
+              'Settings',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
               ),
             ),
+            SizedBox(height: 8),
+            Text(
+              'Settings page coming soon',
+              style: TextStyle(
+                color: Colors.grey,
+                fontSize: 16,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Main Messages Page
+  Widget _buildMessagesPage() {
+    return CustomScrollView(
+      slivers: [
+        SliverAppBar(
+          pinned: true,
+          floating: false,
+          snap: false,
+          elevation: 4,
+          shadowColor: Color.lerp(Colors.transparent, Colors.black, 0.3),
+          surfaceTintColor: Colors.transparent,
+          backgroundColor: mainBGColor,
+          title: const Text(
+            'Messages',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          leading: Builder(
+            builder: (context) => IconButton(
+              icon: const Icon(Icons.menu, color: Colors.white),
+              onPressed: () {
+                Scaffold.of(context).openDrawer();
+              },
+            ),
+          ),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.smart_toy_outlined, color: Colors.white),
+              onPressed: (){},
+              tooltip: 'Chatbot',
+            ),
+            // Add Friend button moved to top bar
+            IconButton(
+              icon: const Icon(Icons.person_add, color: Colors.white),
+              onPressed: _navigateToAddFriend,
+              tooltip: 'Add Friend',
+            ),
+          ],
+        ),
+        SliverPadding(
+          padding: const EdgeInsets.all(16.0),
+          sliver: SliverToBoxAdapter(
+            child: Container(
+              height: 50,
+              decoration: BoxDecoration(
+                color: Colors.grey[900],
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _searchController,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(
+                        prefixIcon: Icon(Icons.search, color: Colors.grey),
+                        hintText: 'Search messages...',
+                        hintStyle: TextStyle(color: Colors.grey),
+                        border: InputBorder.none,
+                        contentPadding:
+                            EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+                      ),
+                      onChanged: _filterChats,
+                    ),
+                  ),
+                  if (_searchQuery.isNotEmpty)
+                    IconButton(
+                      icon: const Icon(Icons.clear, color: Colors.grey),
+                      onPressed: () {
+                        _searchController.clear();
+                        _filterChats('');
+                      },
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+
+        // Friends List Section
+        if (_isLoadingFriends)
+          SliverFillRemaining(
+            child: _buildLoadingIndicator(),
+          )
+        else if (_friendsList.isEmpty)
+          SliverFillRemaining(
+            child: _buildEmptyState(),
+          )
+        else if (_filteredFriendsList.isEmpty && _searchQuery.isNotEmpty)
+          SliverFillRemaining(
+            child: _buildSearchEmptyState(),
+          )
+        else
+          SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, index) {
+                final friend = _filteredFriendsList[index];
+                return _buildChatListItem(friend);
+              },
+              childCount: _filteredFriendsList.length,
+            ),
+          ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: mainBGColor,
+      drawer: _buildUserDrawer(),
+      // Remove floating action button since it's moved to app bar
+      body: _buildCurrentPage(),
+      bottomNavigationBar: _buildBottomNavigationBar(),
+    );
+  }
+
+  Widget _buildCurrentPage() {
+    switch (_currentIndex) {
+      case 0:
+        return _buildMessagesPage();
+      case 1:
+        return _buildCommunityPage();
+      case 2:
+        return _buildSettingsPage();
+      default:
+        return _buildMessagesPage();
+    }
+  }
+
+  Widget _buildBottomNavigationBar() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.grey[900],
+        border: Border(
+          top: BorderSide(color: Colors.grey[800]!, width: 1),
+        ),
+      ),
+      child: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        onTap: (index) {
+          setState(() {
+            _currentIndex = index;
+          });
+        },
+        backgroundColor: Colors.grey[900],
+        selectedItemColor: Colors.blue[400],
+        unselectedItemColor: Colors.grey[500],
+        selectedLabelStyle: TextStyle(fontSize: 12),
+        unselectedLabelStyle: TextStyle(fontSize: 12),
+        type: BottomNavigationBarType.fixed,
+        // Add these properties to remove the splash/ripple effect
+        enableFeedback: false, // Disables haptic feedback
+        // Use custom icon widgets to remove splash effect
+        items: [
+          BottomNavigationBarItem(
+            icon: Container(
+              padding: EdgeInsets.all(8),
+              child: Icon(
+                Icons.chat,
+                color: _currentIndex == 0 ? Colors.blue[400] : Colors.grey[500],
+              ),
+            ),
+            label: 'Messages',
+          ),
+          BottomNavigationBarItem(
+            icon: Container(
+              padding: EdgeInsets.all(8),
+              child: Icon(
+                Icons.people,
+                color: _currentIndex == 1 ? Colors.blue[400] : Colors.grey[500],
+              ),
+            ),
+            label: 'Community',
+          ),
+          BottomNavigationBarItem(
+            icon: Container(
+              padding: EdgeInsets.all(8),
+              child: Icon(
+                Icons.settings,
+                color: _currentIndex == 2 ? Colors.blue[400] : Colors.grey[500],
+              ),
+            ),
+            label: 'Settings',
+          ),
         ],
       ),
     );
@@ -731,6 +953,9 @@ class _ChatListState extends State<ChatList> {
                 const Text('Settings', style: TextStyle(color: Colors.white)),
             onTap: () {
               Navigator.pop(context);
+              setState(() {
+                _currentIndex = 2; // Navigate to settings page
+              });
             },
           ),
           const Divider(color: Colors.grey),

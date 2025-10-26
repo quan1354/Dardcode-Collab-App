@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
 import 'package:darkord/api/auth_api.dart';
 import 'package:darkord/utils/dialog_utils.dart';
+import 'package:location/location.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:io' show Platform;
 
 class LoginForm extends StatefulWidget {
   const LoginForm({super.key});
@@ -21,6 +24,56 @@ class _LoginFormState extends State<LoginForm> {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final AuthApi _authApi = AuthApi();
+
+  Location location = new Location();
+  bool _locationServiceEnabled = false;
+  PermissionStatus? _permissionGranted;
+  LocationData? _locationData;
+
+  // Check if the platform supports location services
+  bool get _supportsLocation {
+    // Skip location on web and Windows
+    if (kIsWeb) return false;
+    if (Platform.isWindows) return false;
+    // You can add other unsupported platforms if needed
+    // if (Platform.isLinux) return false;
+    // if (Platform.isMacOS) return false;
+    return true;
+  }
+
+  Future<void> _requestLocationPermission() async {
+    // Skip location request if platform doesn't support it
+    if (!_supportsLocation) {
+      logger.i('Location services not supported on this platform');
+      return;
+    }
+
+    try {
+      _locationServiceEnabled = await location.serviceEnabled();
+      if (!_locationServiceEnabled) {
+        _locationServiceEnabled = await location.requestService();
+        if (!_locationServiceEnabled) {
+          logger.w('Location service is not enabled');
+          return;
+        }
+      }
+
+      _permissionGranted = await location.hasPermission();
+      if (_permissionGranted == PermissionStatus.denied) {
+        _permissionGranted = await location.requestPermission();
+        if (_permissionGranted != PermissionStatus.granted) {
+          logger.w('Location permission denied');
+          return;
+        }
+      }
+
+      _locationData = await location.getLocation();
+      setState(() {});
+      logger.i('Location permission granted. Location data: $_locationData');
+    } catch (e) {
+      logger.e('Error requesting location permission: $e');
+    }
+  }
 
   String? _validatePassword(String? value) {
     if (value == null || value.isEmpty) {
@@ -49,6 +102,10 @@ class _LoginFormState extends State<LoginForm> {
 
     setState(() => _isLoading = true);
 
+    // Variables to store location data
+    double? userLatitude;
+    double? userLongitude;
+
     try {
       DialogUtils.showLoading(context, 'Logging in...');
 
@@ -60,13 +117,38 @@ class _LoginFormState extends State<LoginForm> {
       Navigator.pop(context);
       DialogUtils.showSuccess(context, 'Login successful!');
 
-      // Pass the response data to ChatList
+      // Only request location on supported platforms
+      if (_supportsLocation) {
+        await _requestLocationPermission();
+
+        if (_locationData != null) {
+          userLatitude = _locationData!.latitude;
+          userLongitude = _locationData!.longitude;
+
+          // Print location data
+          print(
+              'User Location - Latitude: $userLatitude, Longitude: $userLongitude');
+
+          logger.i(
+              'Location data stored - Lat: $userLatitude, Long: $userLongitude');
+        } else {
+          logger.w('Location data is null');
+        }
+      } else {
+        logger.i('Skipping location request on this platform');
+        print('Platform does not support location services');
+      }
+
+      // Pass the response data and location to ChatList
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
           builder: (context) => ChatList(
             accessToken: _authApi.accessToken ?? '',
             loginPayload: response, // Pass the response data
+            // If you want to pass location to ChatList, add these parameters:
+            // userLatitude: userLatitude,
+            // userLongitude: userLongitude,
           ),
         ),
       );
