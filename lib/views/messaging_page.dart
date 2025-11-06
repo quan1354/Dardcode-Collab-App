@@ -1,7 +1,8 @@
-// messaging_page.dart
 import 'package:flutter/material.dart';
-import 'package:darkord/consts/color.dart';
-import 'package:darkord/api/auth_api.dart';
+import 'package:darkord/consts/app_constants.dart';
+import 'package:darkord/api/api_service.dart';
+import 'package:darkord/utils/token_utils.dart';
+import 'package:darkord/widgets/common_widgets.dart';
 import 'dart:convert';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'dart:async';
@@ -12,7 +13,7 @@ class MessagingPage extends StatefulWidget {
   final String friendUsername;
   final String? friendAvatarUrl;
   final String friendStatus;
-  final AuthApi authApi; // Add this parameter
+  final ApiService apiService;
 
   const MessagingPage({
     super.key,
@@ -21,7 +22,7 @@ class MessagingPage extends StatefulWidget {
     required this.friendUsername,
     this.friendAvatarUrl,
     required this.friendStatus,
-    required this.authApi, // Add this parameter
+    required this.apiService,
   });
 
   @override
@@ -34,7 +35,7 @@ class _MessagingPageState extends State<MessagingPage> {
 
   // Add these variables for chat history
   List<Map<String, dynamic>> _messages = [];
-  bool _isLoadingHistory = true;
+  bool _isLoadingHistory = false; // Changed to false - load in background
   bool _hasMoreMessages = true;
   String? _lastMessageId;
 
@@ -64,9 +65,7 @@ class _MessagingPageState extends State<MessagingPage> {
 
   Future<void> _fetchChatHistory() async {
     try {
-      setState(() {
-        _isLoadingHistory = true;
-      });
+      // Don't show loading indicator - load in background like WhatsApp
 
       // Get current user ID from token
       final currentUserId = _getUserIdFromToken(widget.accessToken);
@@ -75,7 +74,7 @@ class _MessagingPageState extends State<MessagingPage> {
       }
 
       // Fetch message history
-      final response = await widget.authApi
+      final response = await widget.apiService
           .getMessageHistory(currentUserId, widget.friendId);
 
       if (response['success'] == true) {
@@ -106,7 +105,6 @@ class _MessagingPageState extends State<MessagingPage> {
 
         setState(() {
           _messages = historyMessages;
-          _isLoadingHistory = false;
         });
 
         // Scroll to bottom after loading
@@ -118,67 +116,38 @@ class _MessagingPageState extends State<MessagingPage> {
       }
     } catch (error) {
       print('Error fetching chat history: $error');
-      setState(() {
-        _isLoadingHistory = false;
-      });
-
-      // Show error to user
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to load chat history'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      // Don't show error for background loading
     }
   }
 
   // Helper method to extract user ID from token
   String? _getUserIdFromToken(String accessToken) {
-    try {
-      final List<String> parts = accessToken.split('.');
-      if (parts.length != 3) return null;
-
-      final String payloadBase64 = parts[1];
-      String paddedPayload = payloadBase64;
-      while (paddedPayload.length % 4 != 0) {
-        paddedPayload += '=';
-      }
-
-      final String decodedJson = utf8.decode(base64Url.decode(paddedPayload));
-      final Map<String, dynamic> tokenData = json.decode(decodedJson);
-
-      return tokenData['sub']?.toString();
-    } catch (e) {
-      print('Error decoding token: $e');
-      return null;
-    }
+    return TokenUtils.getUserIdFromToken(accessToken);
   }
 
   void _logConnectionStatus() {
     print('=== WebSocket Connection Status ===');
-    print('isWebSocketConnected: ${widget.authApi.isWebSocketConnected}');
+    print('isWebSocketConnected: ${widget.apiService.isWebSocketConnected}');
     print(
-        'webSocketChannel: ${widget.authApi.currentWebSocketChannel != null}');
+        'webSocketChannel: ${widget.apiService.currentWebSocketChannel != null}');
     print('==================================');
   }
 
   void _setupWebSocketListeners() {
-    // Listen for messages specific to this conversation using the passed authApi
-    widget.authApi.addMessageHandler(_handleIncomingMessage);
+    // Listen for messages specific to this conversation using the passed ApiService
+    widget.apiService.addMessageHandler(_handleIncomingMessage);
   }
 
   @override
   void dispose() {
-    // Remove the handler using the passed authApi
-    widget.authApi.removeMessageHandler(_handleIncomingMessage);
+    // Remove the handler using the passed ApiService
+    widget.apiService.removeMessageHandler(_handleIncomingMessage);
 
     _isDisposed = true;
 
     // Clean up timers
     _typingDebounceTimer?.cancel();
-    widget.authApi.stopTyping();
+    widget.apiService.stopTyping();
 
     // Dispose controllers
     _messageController.dispose();
@@ -194,7 +163,7 @@ class _MessagingPageState extends State<MessagingPage> {
     }
   }
 
-  // Update all methods to use widget.authApi instead of _authApi
+  // Update all methods to use widget.ApiService instead of _ApiService
 
   void _handleIncomingMessage(dynamic message) {
     try {
@@ -300,13 +269,13 @@ class _MessagingPageState extends State<MessagingPage> {
   void _sendTypingEvent() {
     try {
       // Check if WebSocket is actually connected before sending
-      if (!widget.authApi.isWebSocketConnected) {
+      if (!widget.apiService.isWebSocketConnected) {
         print('WebSocket not connected, attempting to reconnect...');
         _reconnect();
         return;
       }
 
-      widget.authApi.startTyping(widget.accessToken, widget.friendId);
+      widget.apiService.startTyping(widget.accessToken, widget.friendId);
       print('Typing indicator sent to ${widget.friendUsername}');
     } catch (e) {
       print('Error sending typing event: $e');
@@ -318,15 +287,15 @@ class _MessagingPageState extends State<MessagingPage> {
   void _stopTypingEvent() {
     _isUserTyping = false;
     _typingDebounceTimer?.cancel();
-    widget.authApi.stopTyping();
+    widget.apiService.stopTyping();
     print('Typing indicator stopped for ${widget.friendUsername}');
   }
 
   void _sendMessage() {
     final text = _messageController.text.trim();
 
-    // Use the global WebSocket connection status from authApi
-    if (text.isEmpty || !widget.authApi.isWebSocketConnected) return;
+    // Use the global WebSocket connection status from ApiService
+    if (text.isEmpty || !widget.apiService.isWebSocketConnected) return;
 
     // Stop typing when sending message
     _stopTypingEvent();
@@ -348,8 +317,8 @@ class _MessagingPageState extends State<MessagingPage> {
     _scrollToBottom();
 
     try {
-      // Send via WebSocket using the passed authApi
-      widget.authApi.sendMessage(widget.accessToken, text, widget.friendId);
+      // Send via WebSocket using the passed ApiService
+      widget.apiService.sendMessage(widget.accessToken, text, widget.friendId);
 
       // Update status to sent
       _safeSetState(() {
@@ -379,10 +348,10 @@ class _MessagingPageState extends State<MessagingPage> {
     if (mounted) {
       try {
         print('Attempting to reconnect WebSocket...');
-        await widget.authApi.connectToWebSocket(widget.accessToken);
+        await widget.apiService.connectToWebSocket(widget.accessToken);
 
         // Check connection status after reconnection attempt
-        if (widget.authApi.isWebSocketConnected) {
+        if (widget.apiService.isWebSocketConnected) {
           print('WebSocket reconnected successfully');
           if (mounted) {
             setState(() {});
@@ -399,7 +368,7 @@ class _MessagingPageState extends State<MessagingPage> {
   // Update connection status indicator to use global WebSocket status
   Widget _buildConnectionStatusIndicator() {
     // Use the global WebSocket connection status
-    final isConnected = widget.authApi.isWebSocketConnected;
+    final isConnected = widget.apiService.isWebSocketConnected;
 
     if (!isConnected) {
       return GestureDetector(
@@ -446,35 +415,18 @@ class _MessagingPageState extends State<MessagingPage> {
   }
 
   Widget _buildLoadingHistory() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          CircularProgressIndicator(
-            color: Colors.blue,
-          ),
-          SizedBox(height: 16),
-          Text(
-            'Loading chat history...',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 16,
-            ),
-          ),
-        ],
-      ),
-    );
+    return const LoadingIndicator(message: 'Loading chat history...');
   }
 
   // Update the build method to use global connection status
   @override
   Widget build(BuildContext context) {
-    final isConnected = widget.authApi.isWebSocketConnected;
+    final isConnected = widget.apiService.isWebSocketConnected;
 
     return Scaffold(
-      backgroundColor: mainBGColor,
+      backgroundColor: AppConstants.mainBGColor,
       appBar: AppBar(
-        backgroundColor: mainBGColor,
+        backgroundColor: AppConstants.mainBGColor,
         elevation: 1,
         shadowColor: Colors.black.withOpacity(0.3),
         leading: IconButton(
@@ -575,20 +527,12 @@ class _MessagingPageState extends State<MessagingPage> {
       ),
       body: Column(
         children: [
-          if (_isLoadingHistory)
-            LinearProgressIndicator(
-              backgroundColor: Colors.grey[800],
-              color: Colors.blue,
-              minHeight: 2,
-            ),
           Expanded(
-            child: _isLoadingHistory
-                ? _buildLoadingHistory()
-                : ListView(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.symmetric(vertical: 8.0),
-                    children: _buildMessageList(),
-                  ),
+            child: ListView(
+              controller: _scrollController,
+              padding: const EdgeInsets.symmetric(vertical: 8.0),
+              children: _buildMessageList(),
+            ),
           ),
           Container(
             padding: const EdgeInsets.all(16.0),
@@ -616,7 +560,7 @@ class _MessagingPageState extends State<MessagingPage> {
                       child: Container(
                         decoration: BoxDecoration(
                           color: Colors.grey[800],
-                          borderRadius: BorderRadius.circular(24.0),
+                          borderRadius: BorderRadius.circular(AppConstants.defaultBorderRadius * 2),
                         ),
                         child: Row(
                           children: [
@@ -671,7 +615,7 @@ class _MessagingPageState extends State<MessagingPage> {
   }
 
   // ... keep the rest of your existing methods (_buildMessageBubble, _buildDateSeparator, etc.)
-  // but make sure to update any references from _authApi to widget.authApi
+  // but make sure to update any references from _ApiService to widget.ApiService
 
   Widget _buildStatusRow(String label, bool isConnected) {
     return Padding(
@@ -705,7 +649,7 @@ class _MessagingPageState extends State<MessagingPage> {
   }
 
   void _showConnectionInfo() {
-    final isConnected = widget.authApi.isWebSocketConnected;
+    final isConnected = widget.apiService.isWebSocketConnected;
 
     showDialog(
       context: context,
@@ -804,104 +748,283 @@ class _MessagingPageState extends State<MessagingPage> {
         : DateTime.now();
     final status = message['status'] ?? 'sent';
 
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 16.0),
-      child: Row(
-        mainAxisAlignment:
-            isSentByMe ? MainAxisAlignment.end : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          if (!isSentByMe)
-            CircleAvatar(
-              radius: 16,
-              backgroundColor: Colors.grey,
-              backgroundImage: widget.friendAvatarUrl != null
-                  ? NetworkImage(widget.friendAvatarUrl!)
-                  : null,
-              child: widget.friendAvatarUrl == null
-                  ? const Icon(Icons.person, size: 16, color: Colors.white)
-                  : null,
-            ),
-          Flexible(
-            child: Container(
-              margin: EdgeInsets.only(
-                left: isSentByMe ? 60.0 : 8.0,
-                right: isSentByMe ? 8.0 : 60.0,
+    return GestureDetector(
+      onLongPress: () => _showMessageMenu(context, message),
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 16.0),
+        child: Row(
+          mainAxisAlignment:
+              isSentByMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            if (!isSentByMe)
+              CircleAvatar(
+                radius: 16,
+                backgroundColor: Colors.grey,
+                backgroundImage: widget.friendAvatarUrl != null
+                    ? NetworkImage(widget.friendAvatarUrl!)
+                    : null,
+                child: widget.friendAvatarUrl == null
+                    ? const Icon(Icons.person, size: 16, color: Colors.white)
+                    : null,
               ),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-              decoration: BoxDecoration(
-                color: isSentByMe ? Colors.blue[800] : Colors.grey[800],
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(20.0),
-                  topRight: const Radius.circular(20.0),
-                  bottomLeft: isSentByMe
-                      ? const Radius.circular(20.0)
-                      : const Radius.circular(4.0),
-                  bottomRight: isSentByMe
-                      ? const Radius.circular(4.0)
-                      : const Radius.circular(20.0),
+            Flexible(
+              child: Container(
+                margin: EdgeInsets.only(
+                  left: isSentByMe ? 60.0 : 8.0,
+                  right: isSentByMe ? 8.0 : 60.0,
+                ),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                decoration: BoxDecoration(
+                  color: isSentByMe ? Colors.blue[800] : Colors.grey[800],
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(20.0),
+                    topRight: const Radius.circular(20.0),
+                    bottomLeft: isSentByMe
+                        ? const Radius.circular(20.0)
+                        : const Radius.circular(4.0),
+                    bottomRight: isSentByMe
+                        ? const Radius.circular(4.0)
+                        : const Radius.circular(20.0),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      text,
+                      style: const TextStyle(color: Colors.white, fontSize: 16),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _formatTime(timestamp),
+                          style: TextStyle(
+                            color: Colors.grey[400],
+                            fontSize: 12,
+                          ),
+                        ),
+                        if (isSentByMe) ...[
+                          const SizedBox(width: 4),
+                          _buildMessageStatusIcon(status),
+                        ],
+                      ],
+                    ),
+                  ],
                 ),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    text,
-                    style: const TextStyle(color: Colors.white, fontSize: 16),
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        _formatTime(timestamp),
-                        style: TextStyle(
-                          color: Colors.grey[400],
-                          fontSize: 12,
-                        ),
-                      ),
-                      if (isSentByMe) ...[
-                        const SizedBox(width: 4),
-                        if (status == 'sending')
-                          SizedBox(
-                            width: 12,
-                            height: 12,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.grey[400],
-                            ),
-                          )
-                        else
-                          Icon(
-                            status == 'read'
-                                ? Icons.done_all
-                                : status == 'failed'
-                                    ? Icons.error
-                                    : Icons.done,
-                            size: 12,
-                            color: status == 'read'
-                                ? Colors.blue
-                                : status == 'failed'
-                                    ? Colors.red
-                                    : Colors.grey[400],
-                          ),
-                      ],
-                    ],
-                  ),
-                ],
+            ),
+            if (isSentByMe)
+              CircleAvatar(
+                radius: 16,
+                backgroundColor: Colors.grey[700],
+                child: const Icon(Icons.person, size: 16, color: Colors.white),
               ),
-            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Enhanced read receipts with WhatsApp-style icons
+  Widget _buildMessageStatusIcon(String status) {
+    switch (status) {
+      case 'sending':
+        return SizedBox(
+          width: 12,
+          height: 12,
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            color: Colors.grey[400],
           ),
-          if (isSentByMe)
-            CircleAvatar(
-              radius: 16,
-              backgroundColor: Colors.grey[700],
-              child: const Icon(Icons.person, size: 16, color: Colors.white),
+        );
+      case 'sent':
+        // Single grey check
+        return Icon(
+          Icons.check,
+          size: 14,
+          color: Colors.grey[400],
+        );
+      case 'delivered':
+        // Double grey checks
+        return Icon(
+          Icons.done_all,
+          size: 14,
+          color: Colors.grey[400],
+        );
+      case 'read':
+        // Double blue checks (WhatsApp style)
+        return Icon(
+          Icons.done_all,
+          size: 14,
+          color: Colors.blue[400],
+        );
+      case 'failed':
+        return Icon(
+          Icons.error_outline,
+          size: 14,
+          color: Colors.red[400],
+        );
+      default:
+        return Icon(
+          Icons.check,
+          size: 14,
+          color: Colors.grey[400],
+        );
+    }
+  }
+
+  // Long press message menu (WhatsApp-style)
+  void _showMessageMenu(BuildContext context, Map<String, dynamic> message) {
+    final isSentByMe = message['isSentByMe'] ?? false;
+    
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.grey[900],
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.symmetric(vertical: 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildMenuOption(
+              icon: Icons.reply,
+              label: 'Reply',
+              onTap: () {
+                Navigator.pop(context);
+                // TODO: Implement reply functionality
+                print('Reply to message: ${message['text']}');
+              },
             ),
+            _buildMenuOption(
+              icon: Icons.copy,
+              label: 'Copy',
+              onTap: () {
+                Navigator.pop(context);
+                // TODO: Copy to clipboard
+                print('Copy message: ${message['text']}');
+              },
+            ),
+            if (isSentByMe)
+              _buildMenuOption(
+                icon: Icons.delete,
+                label: 'Delete',
+                color: Colors.red,
+                onTap: () {
+                  Navigator.pop(context);
+                  _deleteMessage(message);
+                },
+              ),
+            _buildMenuOption(
+              icon: Icons.star_border,
+              label: 'Star',
+              onTap: () {
+                Navigator.pop(context);
+                // TODO: Star message
+                print('Star message: ${message['text']}');
+              },
+            ),
+            _buildMenuOption(
+              icon: Icons.info_outline,
+              label: 'Info',
+              onTap: () {
+                Navigator.pop(context);
+                _showMessageInfo(message);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMenuOption({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    Color? color,
+  }) {
+    return ListTile(
+      leading: Icon(icon, color: color ?? Colors.white),
+      title: Text(
+        label,
+        style: TextStyle(color: color ?? Colors.white),
+      ),
+      onTap: onTap,
+    );
+  }
+
+  void _deleteMessage(Map<String, dynamic> message) {
+    setState(() {
+      _messages.remove(message);
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Message deleted'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _showMessageInfo(Map<String, dynamic> message) {
+    final timestamp = message['timestamp'] as DateTime;
+    final status = message['status'] ?? 'sent';
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        title: const Text(
+          'Message Info',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildInfoRow('Sent', _formatFullDateTime(timestamp)),
+            if (status == 'delivered' || status == 'read')
+              _buildInfoRow('Delivered', _formatFullDateTime(timestamp)),
+            if (status == 'read')
+              _buildInfoRow('Read', _formatFullDateTime(timestamp)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close', style: TextStyle(color: Colors.blue)),
+          ),
         ],
       ),
     );
+  }
+
+  Widget _buildInfoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: TextStyle(color: Colors.grey[400]),
+          ),
+          Text(
+            value,
+            style: const TextStyle(color: Colors.white),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatFullDateTime(DateTime timestamp) {
+    return '${timestamp.month}/${timestamp.day}/${timestamp.year} ${_formatTime(timestamp)}';
   }
 
   Widget _buildDateSeparator(DateTime date) {

@@ -5,10 +5,12 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart';
 import 'dart:async';
 
-class AuthApi {
-  static final AuthApi _instance = AuthApi._internal();
-  factory AuthApi() => _instance;
-  AuthApi._internal(); // Private constructor
+/// Centralized API service for all backend communication
+/// Handles authentication, user management, chat, and WebSocket connections
+class ApiService {
+  static final ApiService _instance = ApiService._internal();
+  factory ApiService() => _instance;
+  ApiService._internal(); // Private constructor
 
   static const String _baseUrl = 'https://d3v904dal0xey8.cloudfront.net';
   String? _accessToken;
@@ -470,13 +472,13 @@ class AuthApi {
 
   Future<Map<String, dynamic>> addUsers(
       String accessToken, String user_id, List<String> other_user_ids) async {
-    try {
+    return await retryWithTokenRefresh(() async {
       final addUsersUrl = Uri.parse('$_baseUrl/chat/$user_id/list');
 
       final response = await http.post(
         addUsersUrl,
         headers: {
-          'Authorization': accessToken,
+          'Authorization': this.accessToken!,
           'Content-Type': 'application/json',
         },
         body: jsonEncode({'other_user_ids': other_user_ids}),
@@ -490,14 +492,12 @@ class AuthApi {
       }
 
       return {'success': true, 'message': 'Add Users successfully'};
-    } catch (e) {
-      throw Exception('Add Users error: $e');
-    }
+    });
   }
 
   Future<dynamic> fetchUsers(String accessToken, String userIds,
       {bool returnList = false}) async {
-    try {
+    return await retryWithTokenRefresh(() async {
       final uri = Uri.parse('$_baseUrl/user/list').replace(queryParameters: {
         'user_ids': userIds,
       });
@@ -505,7 +505,7 @@ class AuthApi {
       final response = await http.get(
         uri,
         headers: {
-          'Authorization': accessToken,
+          'Authorization': this.accessToken!,
         },
       );
 
@@ -531,20 +531,18 @@ class AuthApi {
       } else {
         throw Exception('Failed to fetch user: ${response.statusCode}');
       }
-    } catch (e) {
-      throw Exception('Error fetching user: $e');
-    }
+    });
   }
 
   Future<Map<String, dynamic>> fetchChatUsers(
       String accessToken, String user_id) async {
-    try {
+    return await retryWithTokenRefresh(() async {
       final fetchUsersUrl = Uri.parse('$_baseUrl/chat/$user_id/list');
 
       final response = await http.get(
         fetchUsersUrl,
         headers: {
-          'Authorization': accessToken,
+          'Authorization': this.accessToken!,
           'Content-Type': 'application/json',
         },
       );
@@ -562,16 +560,12 @@ class AuthApi {
         'message': 'Fetch Users successfully',
         'data': responseData // Include the actual data
       };
-    } catch (e) {
-      throw Exception('Fetch Users error: $e');
-    }
+    });
   }
 
   Future<Map<String, dynamic>> getMessageHistory(
        user_id, other_user_id) async {
-    try {
-
-
+    return await retryWithTokenRefresh(() async {
       final addUsersUrl =
           Uri.parse('$_baseUrl/chat/$user_id/$other_user_id/messages');
 
@@ -592,25 +586,23 @@ class AuthApi {
       }
 
       return {'success': true, 'message': responseData};
-    } catch (e) {
-      throw Exception('WebSocket token error: ${e.toString()}');
-    }
+    });
   }
 
   Future<String> getWebSocketToken(accessToken) async {
-    try {
-      if (accessToken == null) {
+    return await retryWithTokenRefresh(() async {
+      if (this.accessToken == null) {
         throw Exception('No access token available. Please login first.');
       }
 
       print(
-          'Fetching WebSocket token with access token: ${accessToken!.substring(0, 20)}...');
+          'Fetching WebSocket token with access token: ${this.accessToken!.substring(0, 20)}...');
 
       final response = await http.post(
         Uri.parse('https://d3v904dal0xey8.cloudfront.net/chat/ws_token'),
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': accessToken!,
+          'Authorization': this.accessToken!,
         },
       );
 
@@ -626,9 +618,7 @@ class AuthApi {
       print('WebSocket token received: ${wsToken.substring(0, 20)}...');
 
       return wsToken;
-    } catch (e) {
-      throw Exception('WebSocket token error: ${e.toString()}');
-    }
+    });
   }
 
   void checkConnectionHealth() {
@@ -828,13 +818,13 @@ class AuthApi {
       _refreshToken != null && _refreshToken!.isNotEmpty;
 
   Future<Map<String, dynamic>> logoutUser(String accessToken) async {
-    try {
+    return await retryWithTokenRefresh(() async {
       final logoutUserUrl = Uri.parse('$_baseUrl/user/logout');
 
       final response = await http.post(
         logoutUserUrl,
         headers: {
-          'Authorization': accessToken,
+          'Authorization': this.accessToken!,
           'Content-Type': 'application/json',
         },
       );
@@ -853,9 +843,7 @@ class AuthApi {
       clearTokens();
 
       return {'success': true, 'message': 'LogOut successfully'};
-    } catch (e) {
-      throw Exception('LogOut error: $e');
-    }
+    });
   }
 
   /// Get all tokens as a map for easy storage/retrieval
@@ -973,13 +961,23 @@ class AuthApi {
   }
 
   /// Helper method to refresh token and retry failed API calls
+  /// Handles both 401 (Unauthorized) and 403 (Forbidden) errors
   Future<T> retryWithTokenRefresh<T>(Future<T> Function() apiCall) async {
     try {
       return await apiCall();
     } catch (e) {
-      // Check if it's an authentication error (401)
-      if (e.toString().contains('401') && canRefreshToken) {
-        print('Authentication error detected, attempting token refresh...');
+      final errorString = e.toString().toLowerCase();
+      
+      // Check if it's an authentication error (401 or 403)
+      final isAuthError = errorString.contains('401') ||
+                         errorString.contains('403') ||
+                         errorString.contains('unauthorized') ||
+                         errorString.contains('forbidden') ||
+                         errorString.contains('token expired');
+      
+      if (isAuthError && canRefreshToken) {
+        print('Authentication error detected: $e');
+        print('Attempting token refresh...');
 
         try {
           // Refresh the token
@@ -1005,7 +1003,7 @@ class AuthApi {
 
   WebSocketChannel? get currentWebSocketChannel => _webSocketChannel;
 
-  // Add to AuthApi class
+  // Add to ApiService class
   void debugConnectionStatus() {
     print('=== WebSocket Connection Debug ===');
     print('_isConnected: $_isConnected');

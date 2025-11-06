@@ -1,23 +1,24 @@
-// chat_list.dart
 import 'package:flutter/material.dart';
-import 'package:darkord/consts/color.dart';
-import 'package:darkord/api/auth_api.dart';
+import 'package:darkord/consts/app_constants.dart';
+import 'package:darkord/api/api_service.dart';
 import 'package:darkord/views/profile.dart';
 import 'package:darkord/views/add_friend_page.dart';
-import 'dart:convert';
 import 'package:darkord/views/messaging_page.dart';
 import 'package:darkord/views/login.dart';
+import 'package:darkord/utils/token_utils.dart';
+import 'package:darkord/widgets/common_widgets.dart';
+import 'dart:convert';
 
 class ChatList extends StatefulWidget {
   final String accessToken;
   final Map<String, dynamic>? loginPayload;
-  final AuthApi authApi; // Add this
+  final ApiService apiService;
 
   const ChatList({
     super.key,
     required this.accessToken,
     this.loginPayload,
-    required this.authApi, // Add this
+    required this.apiService,
   });
 
   @override
@@ -43,12 +44,12 @@ class _ChatListState extends State<ChatList> {
     super.initState();
 
     _fetchUserDataWithToken(widget.accessToken);
-    widget.authApi.debugConnectionStatus();
+    widget.apiService.debugConnectionStatus();
 
 // No need to manually connect - it's already connected after login
     // Just add message handlers
-    widget.authApi.addMessageHandler(_handleWebSocketMessage);
-    widget.authApi.getMessageHistory('10000048', '10000013').then((response) {
+    widget.apiService.addMessageHandler(_handleWebSocketMessage);
+    widget.apiService.getMessageHistory('10000048', '10000013').then((response) {
       print('Messages History: ${response['message']}');
     }).catchError((error) {
       print('Error fetching messages history: $error');
@@ -58,25 +59,20 @@ class _ChatListState extends State<ChatList> {
   @override
   void dispose() {
     _searchController.dispose();
-    widget.authApi.removeMessageHandler(_handleWebSocketMessage);
+    widget.apiService.removeMessageHandler(_handleWebSocketMessage);
     super.dispose();
   }
 
 // ===================== COMMON FUNCTIONS =====================
   void _fetchUserDataWithToken(String accessToken) async {
     try {
-      // Decode token to get user ID
-      final List<String> parts = accessToken.split('.');
-      final String payloadBase64 = parts[1];
-      String paddedPayload = payloadBase64;
-      while (paddedPayload.length % 4 != 0) {
-        paddedPayload += '=';
+      // Decode token to get user ID using utility
+      final userId = TokenUtils.getUserIdFromToken(accessToken);
+      if (userId == null) {
+        throw Exception('Could not extract user ID from token');
       }
-      final String decodedJson = utf8.decode(base64Url.decode(paddedPayload));
-      final Map<String, dynamic> tokenData = json.decode(decodedJson);
 
-      final user =
-          await widget.authApi.fetchUsers(accessToken, tokenData['sub']);
+      final user = await widget.apiService.fetchUsers(accessToken, userId);
       setState(() {
         _userData = {
           'user_id': user.userId,
@@ -175,7 +171,7 @@ class _ChatListState extends State<ChatList> {
             accessToken: widget.accessToken,
             userData: _userData,
             currentFriends: _friendsList, // Pass current friends list
-            authApi: widget.authApi),
+            apiService: widget.apiService),
       ),
     ).then((_) {
       // Refresh friends list when returning from AddFriendPage
@@ -197,7 +193,7 @@ class _ChatListState extends State<ChatList> {
       print('Fetching friends for user: $userId with token: $accessToken');
 
       final friendsResponse =
-          await widget.authApi.fetchChatUsers(accessToken, userId);
+          await widget.apiService.fetchChatUsers(accessToken, userId);
       print('Fetch Users Response: $friendsResponse');
 
       List<dynamic> results = [];
@@ -245,7 +241,7 @@ class _ChatListState extends State<ChatList> {
       final userIdsString = userIds.join(',');
       print('Batch fetching user details for IDs: $userIdsString');
 
-      final batchUserDetails = await widget.authApi
+      final batchUserDetails = await widget.apiService
           .fetchUsers(accessToken, userIdsString, returnList: true);
 
       // Process the batch response and update cache
@@ -275,7 +271,7 @@ class _ChatListState extends State<ChatList> {
       if (!_userDetailsCache.containsKey(userId)) {
         try {
           final userDetails =
-              await widget.authApi.fetchUsers(accessToken, userId);
+              await widget.apiService.fetchUsers(accessToken, userId);
           setState(() {
             _userDetailsCache[userId] = {
               'username': userDetails.username ?? 'Unknown User',
@@ -304,30 +300,17 @@ class _ChatListState extends State<ChatList> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          CircularProgressIndicator(
-            color: Colors.blue,
-          ),
-          SizedBox(height: 16),
-          Text(
-            'Loading chats...',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 16,
-            ),
-          ),
-          SizedBox(height: 8),
+          const LoadingIndicator(message: 'Loading chats...'),
+          const SizedBox(height: 8),
           TextButton(
             onPressed: () {
               setState(() {
-                _isLoadingFriends = false; // Manual fallback
+                _isLoadingFriends = false;
               });
             },
-            child: Text(
+            child: const Text(
               'Take too long? Tap here',
-              style: TextStyle(
-                color: Colors.blue,
-                fontSize: 12,
-              ),
+              style: TextStyle(color: Colors.blue, fontSize: 12),
             ),
           ),
         ],
@@ -336,82 +319,35 @@ class _ChatListState extends State<ChatList> {
   }
 
   Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(
-            Icons.chat_bubble_outline,
-            color: Colors.grey,
-            size: 64,
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            'No chats yet',
-            style: TextStyle(
-              color: Colors.grey,
-              fontSize: 18,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Add friends to start chatting',
-            style: TextStyle(
-              color: Colors.grey[600],
-              fontSize: 14,
-            ),
-          ),
-        ],
-      ),
+    return const EmptyState(
+      icon: Icons.chat_bubble_outline,
+      title: 'No chats yet',
+      subtitle: 'Add friends to start chatting',
     );
   }
 
   Widget _buildSearchEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(
-            Icons.search_off,
-            color: Colors.grey,
-            size: 64,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'No results for "$_searchQuery"',
-            style: const TextStyle(
-              color: Colors.grey,
-              fontSize: 18,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Try searching with different keywords',
-            style: TextStyle(
-              color: Colors.grey[600],
-              fontSize: 14,
-            ),
-          ),
-          const SizedBox(height: 16),
-          ElevatedButton(
-            onPressed: () {
-              _searchController.clear();
-              _filterChats('');
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue[800],
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Clear Search'),
-          ),
-        ],
+    return EmptyState(
+      icon: Icons.search_off,
+      title: 'No results for "$_searchQuery"',
+      subtitle: 'Try searching with different keywords',
+      action: ElevatedButton(
+        onPressed: () {
+          _searchController.clear();
+          _filterChats('');
+        },
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.blue[800],
+          foregroundColor: Colors.white,
+        ),
+        child: const Text('Clear Search'),
       ),
     );
   }
 
   Widget _buildCommunityPage() {
     return Scaffold(
-      backgroundColor: mainBGColor,
+      backgroundColor: AppConstants.mainBGColor,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -446,7 +382,7 @@ class _ChatListState extends State<ChatList> {
 
   Widget _buildSettingsPage() {
     return Scaffold(
-      backgroundColor: mainBGColor,
+      backgroundColor: AppConstants.mainBGColor,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -489,7 +425,7 @@ class _ChatListState extends State<ChatList> {
           elevation: 4,
           shadowColor: Color.lerp(Colors.transparent, Colors.black, 0.3),
           surfaceTintColor: Colors.transparent,
-          backgroundColor: mainBGColor,
+          backgroundColor: AppConstants.mainBGColor,
           title: const Text(
             'Messages',
             style: TextStyle(
@@ -524,10 +460,10 @@ class _ChatListState extends State<ChatList> {
           padding: const EdgeInsets.all(16.0),
           sliver: SliverToBoxAdapter(
             child: Container(
-              height: 50,
+              height: AppConstants.buttonHeight,
               decoration: BoxDecoration(
                 color: Colors.grey[900],
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(AppConstants.defaultBorderRadius),
               ),
               child: Row(
                 children: [
@@ -813,7 +749,7 @@ class _ChatListState extends State<ChatList> {
                     try {
                       // Add 'await' and make the callback 'async'
                       final response =
-                          await widget.authApi.logoutUser(widget.accessToken);
+                          await widget.apiService.logoutUser(widget.accessToken);
 
                       if (response['success'] == true) {
                         Navigator.pushAndRemoveUntil(
@@ -921,8 +857,12 @@ class _ChatListState extends State<ChatList> {
     final username = userDetails?['username'] ?? 'User $friendUserId';
     final avatarUrl = userDetails?['avatar_url'];
     final status = userDetails?['status'];
+    final unreadCount = friend['unread_count'] ?? 0;
+    final isOnline = status?.toLowerCase() == 'online';
+    final isPinned = friend['is_pinned'] ?? false;
 
     return ListTile(
+      tileColor: isPinned ? Colors.grey[850] : null,
       leading: GestureDetector(
         onTap: () {
           Navigator.push(
@@ -935,31 +875,95 @@ class _ChatListState extends State<ChatList> {
             ),
           );
         },
-        child: CircleAvatar(
-          backgroundColor: Colors.grey,
-          backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
-          child: avatarUrl == null
-              ? const Icon(Icons.person, color: Colors.white)
-              : null,
+        child: Stack(
+          children: [
+            CircleAvatar(
+              backgroundColor: Colors.grey,
+              backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
+              child: avatarUrl == null
+                  ? const Icon(Icons.person, color: Colors.white)
+                  : null,
+            ),
+            // Online status dot - Quick Win 4
+            if (isOnline)
+              Positioned(
+                right: 0,
+                bottom: 0,
+                child: Container(
+                  width: 14,
+                  height: 14,
+                  decoration: BoxDecoration(
+                    color: Colors.green,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: AppConstants.mainBGColor,
+                      width: 2,
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
-      title: Text(
-        username,
-        style: const TextStyle(color: Colors.white),
+      title: Row(
+        children: [
+          // Pin icon for pinned chats - Quick Win 8
+          if (isPinned)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: Icon(
+                Icons.push_pin,
+                size: 14,
+                color: Colors.grey[400],
+              ),
+            ),
+          Expanded(
+            child: Text(
+              username,
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ),
+        ],
       ),
-      subtitle: Text(
-        _getLastMessage(friend['last_message']?['message']?['text']),
-        style: const TextStyle(color: Colors.grey),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
+      subtitle: _buildSubtitle(friend, isOnline, status),
+      trailing: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Text(
+            _formatLastChatTime(friend['last_chat_at']),
+            style: TextStyle(
+              color: unreadCount > 0 ? Colors.green[400] : Colors.grey,
+              fontSize: 12,
+              fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.normal,
+            ),
+          ),
+          const SizedBox(height: 4),
+          // Unread message counter - Quick Win 1
+          if (unreadCount > 0)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.green[600],
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                unreadCount > 99 ? '99+' : unreadCount.toString(),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+        ],
       ),
-      trailing: Text(
-        _formatLastChatTime(friend['last_chat_at']),
-        style: const TextStyle(color: Colors.grey, fontSize: 12),
-      ),
-      onTap: () {
+      onTap: () async {
         // Navigate to messaging page with all required parameters
-        Navigator.push(
+        await Navigator.push(
           context,
           MaterialPageRoute(
             builder: (context) => MessagingPage(
@@ -968,20 +972,259 @@ class _ChatListState extends State<ChatList> {
               friendUsername: username,
               friendAvatarUrl: avatarUrl,
               friendStatus: status ?? 'offline',
-              authApi: widget.authApi,
+              apiService: widget.apiService,
             ),
           ),
         );
+        
+        // Refresh chat list when returning from messaging page
+        if (_userData != null && _userData!['user_id'] != null) {
+          print('Refreshing chat list after returning from messaging');
+          _fetchCurrentUserFriends(
+            widget.accessToken,
+            _userData!['user_id'].toString(),
+          );
+        }
       },
+      onLongPress: () => _showChatOptions(friend, friendUserId, username),
+    );
+  }
+
+  // Build subtitle with typing indicator or last message - Quick Win 3 & 5
+  Widget _buildSubtitle(Map<String, dynamic> friend, bool isOnline, String? status) {
+    final isTyping = friend['is_typing'] ?? false;
+    final lastMessage = friend['last_message']?['message']?['text'];
+    final unreadCount = friend['unread_count'] ?? 0;
+    final lastSeen = friend['last_seen'];
+
+    if (isTyping) {
+      return Row(
+        children: [
+          Text(
+            'typing',
+            style: TextStyle(
+              color: Colors.green[400],
+              fontSize: 14,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+          const SizedBox(width: 4),
+          _buildTypingDots(),
+        ],
+      );
+    }
+
+    // Show last seen if offline
+    if (!isOnline && lastSeen != null) {
+      final lastSeenText = _formatLastSeen(lastSeen);
+      if (lastSeenText.isNotEmpty) {
+        return Text(
+          lastSeenText,
+          style: TextStyle(
+            color: Colors.grey[500],
+            fontSize: 13,
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        );
+      }
+    }
+
+    return Text(
+      _getLastMessage(lastMessage),
+      style: TextStyle(
+        color: unreadCount > 0 ? Colors.white70 : Colors.grey,
+        fontWeight: unreadCount > 0 ? FontWeight.w500 : FontWeight.normal,
+      ),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
+  }
+
+  // Animated typing dots - Quick Win 3
+  Widget _buildTypingDots() {
+    return Row(
+      children: List.generate(3, (index) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 1),
+          child: Container(
+            width: 4,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.green[400],
+              shape: BoxShape.circle,
+            ),
+          ),
+        );
+      }),
+    );
+  }
+
+  // Format last seen time - Quick Win 5
+  String _formatLastSeen(dynamic lastSeen) {
+    if (lastSeen == null) return '';
+    
+    try {
+      DateTime lastSeenTime;
+      if (lastSeen is int) {
+        lastSeenTime = DateTime.fromMillisecondsSinceEpoch(lastSeen);
+      } else if (lastSeen is String) {
+        lastSeenTime = DateTime.parse(lastSeen);
+      } else {
+        return '';
+      }
+
+      final now = DateTime.now();
+      final difference = now.difference(lastSeenTime);
+
+      if (difference.inMinutes < 1) {
+        return 'last seen just now';
+      } else if (difference.inMinutes < 60) {
+        return 'last seen ${difference.inMinutes}m ago';
+      } else if (difference.inHours < 24) {
+        return 'last seen ${difference.inHours}h ago';
+      } else if (difference.inDays == 1) {
+        return 'last seen yesterday';
+      } else if (difference.inDays < 7) {
+        return 'last seen ${difference.inDays}d ago';
+      } else {
+        return 'last seen ${lastSeenTime.month}/${lastSeenTime.day}/${lastSeenTime.year}';
+      }
+    } catch (e) {
+      return '';
+    }
+  }
+
+  // Long press chat options (pin/unpin, delete, etc.) - Quick Win 8
+  void _showChatOptions(Map<String, dynamic> friend, String friendUserId, String username) {
+    final isPinned = friend['is_pinned'] ?? false;
+    
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.grey[900],
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.symmetric(vertical: 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(
+                isPinned ? Icons.push_pin_outlined : Icons.push_pin,
+                color: Colors.white,
+              ),
+              title: Text(
+                isPinned ? 'Unpin Chat' : 'Pin Chat',
+                style: const TextStyle(color: Colors.white),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _togglePinChat(friend);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete, color: Colors.red),
+              title: const Text(
+                'Delete Chat',
+                style: TextStyle(color: Colors.red),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _deleteChat(friend, username);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.archive, color: Colors.white),
+              title: const Text(
+                'Archive Chat',
+                style: TextStyle(color: Colors.white),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Archive feature coming soon'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _togglePinChat(Map<String, dynamic> friend) {
+    setState(() {
+      friend['is_pinned'] = !(friend['is_pinned'] ?? false);
+      // Re-sort the list to move pinned chats to top
+      _friendsList.sort((a, b) {
+        final aPinned = a['is_pinned'] ?? false;
+        final bPinned = b['is_pinned'] ?? false;
+        if (aPinned && !bPinned) return -1;
+        if (!aPinned && bPinned) return 1;
+        return 0;
+      });
+      _filteredFriendsList = List.from(_friendsList);
+    });
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          friend['is_pinned'] == true ? 'Chat pinned' : 'Chat unpinned',
+        ),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _deleteChat(Map<String, dynamic> friend, String username) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        title: const Text(
+          'Delete Chat',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          'Are you sure you want to delete this chat with $username?',
+          style: const TextStyle(color: Colors.white),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              setState(() {
+                _friendsList.remove(friend);
+                _filteredFriendsList = List.from(_friendsList);
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Chat deleted'),
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            },
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: mainBGColor,
+      backgroundColor: AppConstants.mainBGColor,
       drawer: _buildUserDrawer(),
-      // Remove floating action button since it's moved to app bar
       body: _buildCurrentPage(),
       bottomNavigationBar: _buildBottomNavigationBar(),
     );

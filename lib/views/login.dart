@@ -3,8 +3,11 @@ import 'package:darkord/views/register.dart';
 import 'package:darkord/views/reset_password.dart';
 import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
-import 'package:darkord/api/auth_api.dart';
+import 'package:darkord/api/api_service.dart';
 import 'package:darkord/utils/dialog_utils.dart';
+import 'package:darkord/utils/validators.dart';
+import 'package:darkord/widgets/common_widgets.dart';
+import 'package:darkord/consts/app_constants.dart';
 import 'package:location/location.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:io' show Platform;
@@ -17,143 +20,111 @@ class LoginForm extends StatefulWidget {
 }
 
 class _LoginFormState extends State<LoginForm> {
-  final logger = Logger();
+  final _logger = Logger();
   final _formKey = GlobalKey<FormState>();
-  bool _obscurePassword = true; // Track password visibility
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _apiService = ApiService();
+  
   bool _isLoading = false;
-  final TextEditingController _emailController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
-  final AuthApi _authApi = AuthApi();
-
-  Location location = new Location();
-  bool _locationServiceEnabled = false;
-  PermissionStatus? _permissionGranted;
+  Location? _location;
   LocationData? _locationData;
 
-  // Check if the platform supports location services
-  bool get _supportsLocation {
-    // Skip location on web and Windows
-    if (kIsWeb) return false;
-    if (Platform.isWindows) return false;
-    // You can add other unsupported platforms if needed
-    // if (Platform.isLinux) return false;
-    // if (Platform.isMacOS) return false;
-    return true;
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
   }
 
+  /// Check if the platform supports location services
+  bool get _supportsLocation {
+    if (kIsWeb) return false;
+    try {
+      if (Platform.isWindows) return false;
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// Request location permission and get location data
   Future<void> _requestLocationPermission() async {
-    // Skip location request if platform doesn't support it
     if (!_supportsLocation) {
-      logger.i('Location services not supported on this platform');
+      _logger.i('Location services not supported on this platform');
       return;
     }
 
     try {
-      _locationServiceEnabled = await location.serviceEnabled();
-      if (!_locationServiceEnabled) {
-        _locationServiceEnabled = await location.requestService();
-        if (!_locationServiceEnabled) {
-          logger.w('Location service is not enabled');
+      _location = Location();
+      
+      bool serviceEnabled = await _location!.serviceEnabled();
+      if (!serviceEnabled) {
+        serviceEnabled = await _location!.requestService();
+        if (!serviceEnabled) {
+          _logger.w('Location service is not enabled');
           return;
         }
       }
 
-      _permissionGranted = await location.hasPermission();
-      if (_permissionGranted == PermissionStatus.denied) {
-        _permissionGranted = await location.requestPermission();
-        if (_permissionGranted != PermissionStatus.granted) {
-          logger.w('Location permission denied');
+      PermissionStatus permissionGranted = await _location!.hasPermission();
+      if (permissionGranted == PermissionStatus.denied) {
+        permissionGranted = await _location!.requestPermission();
+        if (permissionGranted != PermissionStatus.granted) {
+          _logger.w('Location permission denied');
           return;
         }
       }
 
-      _locationData = await location.getLocation();
-      setState(() {});
-      logger.i('Location permission granted. Location data: $_locationData');
+      _locationData = await _location!.getLocation();
+      _logger.i('Location data: ${_locationData?.latitude}, ${_locationData?.longitude}');
     } catch (e) {
-      logger.e('Error requesting location permission: $e');
+      _logger.e('Error requesting location permission: $e');
     }
   }
 
-  String? _validatePassword(String? value) {
-    if (value == null || value.isEmpty) {
-      return 'Please enter your password';
-    }
-    if (value.length < 8) {
-      return 'Password must be at least 8 characters long';
-    }
-
-    // Check for at least two of the following: letter, number, or symbol
-    int count = 0;
-    if (RegExp(r'[A-Za-z]').hasMatch(value)) count++; // Check for letters
-    if (RegExp(r'[0-9]').hasMatch(value)) count++; // Check for numbers
-    if (RegExp(r'[!@#$%^&*(),.?":{}|<>]').hasMatch(value))
-      count++; // Check for symbols
-
-    if (count < 2) {
-      return 'Password must include at least two of the following: letter, number, or symbol';
-    }
-
-    return null;
-  }
-
+  /// Handle form submission and login
   Future<void> _submitForm() async {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
 
-    // Variables to store location data
-    double? userLatitude;
-    double? userLongitude;
-
     try {
       DialogUtils.showLoading(context, 'Logging in...');
 
-      final response = await _authApi.login(
+      final response = await _apiService.login(
         _emailController.text.trim(),
         _passwordController.text.trim(),
       );
 
+      if (!mounted) return;
       Navigator.pop(context);
       DialogUtils.showSuccess(context, 'Login successful!');
 
-      // Only request location on supported platforms
+      // Request location on supported platforms
       if (_supportsLocation) {
         await _requestLocationPermission();
-
         if (_locationData != null) {
-          userLatitude = _locationData!.latitude;
-          userLongitude = _locationData!.longitude;
-
-          // Print location data
-          print(
-              'User Location - Latitude: $userLatitude, Longitude: $userLongitude');
-
-          logger.i(
-              'Location data stored - Lat: $userLatitude, Long: $userLongitude');
-        } else {
-          logger.w('Location data is null');
+          print('User Location - Lat: ${_locationData!.latitude}, Long: ${_locationData!.longitude}');
         }
-      } else {
-        logger.i('Skipping location request on this platform');
-        print('Platform does not support location services');
       }
 
-      // Pass the response data and location to ChatList
+      // Navigate to chat list
+      if (!mounted) return;
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
           builder: (context) => ChatList(
-            accessToken: _authApi.accessToken ?? '',
-            authApi: _authApi,
+            accessToken: _apiService.accessToken ?? '',
+            apiService: _apiService,
           ),
         ),
       );
 
       print('Login payload: ${response.toString()}');
     } catch (e) {
-      if (mounted) Navigator.pop(context);
       if (mounted) {
+        Navigator.pop(context);
         DialogUtils.showError(context, e.toString());
       }
     } finally {
@@ -168,165 +139,64 @@ class _LoginFormState extends State<LoginForm> {
     return Scaffold(
       body: Center(
         child: SingleChildScrollView(
-          // Added SingleChildScrollView
           child: Form(
             key: _formKey,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 15.0),
+              padding: const EdgeInsets.symmetric(horizontal: AppConstants.defaultPadding),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white, // White background color
-                      border: Border.all(
-                        color: Colors.yellow, // Border color
-                        width: 5.0, // Border width
-                      ),
-                    ),
-                    child: Image.asset(
-                      'assets/logo2.png', // Path to your image
-                      width: 200, // Set the width
-                      height: 190, // Set the height
-                    ),
-                  ),
-                  Text(
-                    'Darkord',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+                  const AppLogo(),
+                  const AppTitle(),
                   const SizedBox(height: 20),
-                  TextFormField(
+                  
+                  // Email Field
+                  CustomTextField(
                     controller: _emailController,
-                    style: TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      border: OutlineInputBorder(
-                        borderSide: BorderSide(color: Colors.white),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderSide: BorderSide(
-                            color: Colors.white), // Normal border color
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderSide: BorderSide(
-                            color:
-                                Colors.blueAccent), // Border color when focused
-                      ),
-                      labelText: 'Email Address',
-                      labelStyle: TextStyle(color: Colors.white),
-                      hintText: 'Email Address',
-                      hintStyle: TextStyle(color: Colors.white70),
-                      prefixIcon: Icon(Icons.email, color: Colors.white),
-                    ),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Please enter your email';
-                      }
-                      if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$')
-                          .hasMatch(value)) {
-                        return 'Please enter a valid email';
-                      }
-                      return null;
-                    },
+                    labelText: 'Email Address',
+                    hintText: 'Email Address',
+                    prefixIcon: Icons.email,
+                    keyboardType: TextInputType.emailAddress,
+                    validator: Validators.validateEmail,
                   ),
                   const SizedBox(height: 20),
-                  TextFormField(
+                  
+                  // Password Field
+                  PasswordTextField(
                     controller: _passwordController,
-                    obscureText: _obscurePassword, // Use the state variable
-                    style: TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      border: OutlineInputBorder(
-                        borderSide: BorderSide(color: Colors.white),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderSide: BorderSide(
-                            color: Colors.white), // Normal border color
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderSide: BorderSide(
-                            color:
-                                Colors.blueAccent), // Border color when focused
-                      ),
-                      labelText: 'Password',
-                      labelStyle: TextStyle(color: Colors.white),
-                      hintText: 'Password',
-                      hintStyle: TextStyle(color: Colors.white70),
-                      prefixIcon: Icon(Icons.lock, color: Colors.white),
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _obscurePassword
-                              ? Icons.visibility
-                              : Icons.visibility_off,
-                          color: Colors.white,
-                        ),
-                        onPressed: () {
-                          setState(() {
-                            _obscurePassword =
-                                !_obscurePassword; // Toggle visibility
-                          });
-                        },
-                      ),
-                    ),
-                    validator: _validatePassword,
+                    validator: Validators.validatePassword,
                   ),
                   const SizedBox(height: 8),
+                  
+                  // Navigation Links
                   Row(
                     mainAxisAlignment: MainAxisAlignment.start,
                     children: [
-                      TextButton(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (context) => RegisterForm()),
-                          );
-                        },
-                        child: Text(
-                          'don\'t have account ?',
-                          style: TextStyle(
-                            color: const Color.fromARGB(255, 236, 57, 45),
-                            decoration:
-                                TextDecoration.underline, // Underline text
-                            decorationColor: Color.fromARGB(255, 236, 57, 45),
-                          ),
+                      LinkButton(
+                        text: "don't have account ?",
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (context) => const RegisterForm()),
                         ),
                       ),
-                      TextButton(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (context) => ResetPasswordForm()),
-                          );
-                        },
-                        child: Text(
-                          'forgot password ?',
-                          style: TextStyle(
-                            color: const Color.fromARGB(255, 236, 57, 45),
-                            decoration:
-                                TextDecoration.underline, // Underline text
-                            decorationColor: Color.fromARGB(255, 236, 57, 45),
-                          ),
+                      LinkButton(
+                        text: 'forgot password ?',
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (context) => const ResetPasswordForm()),
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 5),
-                  SizedBox(
-                    width: 200, // Set the button width
-                    child: ElevatedButton(
-                      onPressed: () {
-                        if (_formKey.currentState!.validate()) {
-                          _isLoading ? null : _submitForm();
-                        }
-                      },
-                      child: const Text('Login'),
-                    ),
+                  
+                  // Login Button
+                  PrimaryButton(
+                    text: 'Login',
+                    onPressed: _submitForm,
+                    isLoading: _isLoading,
                   ),
-                  const SizedBox(height: 20), // Added extra space at the bottom
+                  const SizedBox(height: 20),
                 ],
               ),
             ),

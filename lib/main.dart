@@ -1,16 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart'; // Add this import
-import 'package:darkord/views/chat_list.dart';
-import 'package:darkord/views/profile.dart';
+import 'package:provider/provider.dart';
 import 'package:darkord/views/login.dart';
-import 'package:darkord/consts/color.dart';
-import 'package:darkord/api/auth_provider.dart'; // You'll need to create this
+import 'package:darkord/consts/app_constants.dart';
+import 'package:darkord/api/auth_provider.dart';
 
 void main() {
   runApp(
     ChangeNotifierProvider(
       create: (context) => AuthProvider(),
-      child: MyApp(),
+      child: const MyApp(),
     ),
   );
 }
@@ -21,12 +19,14 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Darkord',
+      title: AppConstants.appName,
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        appBarTheme: AppBarTheme(backgroundColor: mainBGColor),
-        scaffoldBackgroundColor: mainBGColor,
+        appBarTheme: const AppBarTheme(backgroundColor: AppConstants.mainBGColor),
+        scaffoldBackgroundColor: AppConstants.mainBGColor,
+        useMaterial3: true,
       ),
-      home: LoginForm(),
+      home: const LoginForm(),
     );
   }
 }

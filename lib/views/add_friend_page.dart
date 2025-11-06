@@ -1,22 +1,22 @@
-// add_friend_page.dart
 import 'package:flutter/material.dart';
-import 'package:darkord/consts/color.dart';
+import 'package:darkord/consts/app_constants.dart';
 import 'package:darkord/models/user.dart';
 import 'package:darkord/views/chat_list.dart';
-import 'package:darkord/api/auth_api.dart';
+import 'package:darkord/api/api_service.dart';
+import 'package:darkord/widgets/common_widgets.dart';
 
 class AddFriendPage extends StatefulWidget {
   final String accessToken;
   final Map<String, dynamic>? userData;
-  final List<dynamic>? currentFriends; // Add this parameter
-  final AuthApi authApi; // Add this
+  final List<dynamic>? currentFriends;
+  final ApiService apiService;
 
   const AddFriendPage({
     super.key,
     required this.accessToken,
     this.userData,
-    this.currentFriends, // Add this parameter
-    required this.authApi, // Add this
+    this.currentFriends,
+    required this.apiService,
   });
 
   @override
@@ -27,7 +27,7 @@ class _AddFriendPageState extends State<AddFriendPage> {
   final TextEditingController _searchController = TextEditingController();
   String _currentStatus = 'online';
   final Set<int> _selectedIndices = {};
-  // final AuthApi _authApi = AuthApi();
+  // final ApiService _ApiService = ApiService();
 
   List<User> _nearbyUsers = [];
   List<User> _filteredNearbyUsers = []; // Add filtered list
@@ -41,7 +41,7 @@ class _AddFriendPageState extends State<AddFriendPage> {
       _currentStatus = widget.userData!['status'];
     }
     _fetchNearbyUsers();
-    widget.authApi.printTokenStatus();
+    widget.apiService.printTokenStatus();
   }
 
   @override
@@ -90,7 +90,7 @@ class _AddFriendPageState extends State<AddFriendPage> {
         _errorMessage = '';
       });
 
-      final users = await widget.authApi.findNearbyUsers();
+      final users = await widget.apiService.findNearbyUsers();
 
       // Filter out already friends
       _filterOutFriends(users);
@@ -156,7 +156,7 @@ class _AddFriendPageState extends State<AddFriendPage> {
         });
 
         // Make the actual API call with selected user IDs
-        await widget.authApi.addUsers(widget.authApi.accessToken!,
+        await widget.apiService.addUsers(widget.apiService.accessToken!,
             widget.userData!['user_id'].toString(), selectedUserIds);
 
         // Show success message
@@ -174,7 +174,7 @@ class _AddFriendPageState extends State<AddFriendPage> {
           MaterialPageRoute(
             builder: (context) => ChatList(
               accessToken: widget.accessToken,
-              authApi: widget.authApi,
+              apiService: widget.apiService,
             ),
           ),
         );
@@ -197,24 +197,7 @@ class _AddFriendPageState extends State<AddFriendPage> {
   }
 
   Widget _buildLoadingIndicator() {
-    return const Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          CircularProgressIndicator(
-            color: Colors.blue,
-          ),
-          SizedBox(height: 16),
-          Text(
-            'Loading nearby users...',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 16,
-            ),
-          ),
-        ],
-      ),
-    );
+    return const LoadingIndicator(message: 'Loading nearby users...');
   }
 
   Widget _buildErrorWidget() {
@@ -362,45 +345,21 @@ class _AddFriendPageState extends State<AddFriendPage> {
   }
 
   Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(
-            Icons.group_off,
-            color: Colors.grey,
-            size: 64,
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            'No new users found',
-            style: TextStyle(
-              color: Colors.grey,
-              fontSize: 18,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            widget.currentFriends != null && widget.currentFriends!.isNotEmpty
-                ? 'All nearby users are already your friends'
-                : 'No users found nearby',
-            style: TextStyle(
-              color: Colors.grey[600],
-              fontSize: 14,
-            ),
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ),
+    return EmptyState(
+      icon: Icons.group_off,
+      title: 'No new users found',
+      subtitle: widget.currentFriends != null && widget.currentFriends!.isNotEmpty
+          ? 'All nearby users are already your friends'
+          : 'No users found nearby',
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: mainBGColor,
+      backgroundColor: AppConstants.mainBGColor,
       appBar: AppBar(
-        backgroundColor: mainBGColor,
+        backgroundColor: AppConstants.mainBGColor,
         elevation: 0,
         title: const Text(
           'Add Friends',
@@ -434,10 +393,10 @@ class _AddFriendPageState extends State<AddFriendPage> {
                 padding: const EdgeInsets.all(16.0),
                 sliver: SliverToBoxAdapter(
                   child: Container(
-                    height: 50,
+                    height: AppConstants.buttonHeight,
                     decoration: BoxDecoration(
                       color: Colors.grey[900],
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(AppConstants.defaultBorderRadius),
                     ),
                     child: Row(
                       children: [
@@ -618,10 +577,10 @@ class _AddFriendPageState extends State<AddFriendPage> {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppConstants.defaultPadding),
         decoration: BoxDecoration(
           color: Colors.grey[800],
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppConstants.defaultBorderRadius),
         ),
         child: Column(
           children: [
@@ -658,9 +617,9 @@ class _AddFriendPageState extends State<AddFriendPage> {
       style: ElevatedButton.styleFrom(
         backgroundColor: Colors.blue[800],
         foregroundColor: Colors.white,
-        minimumSize: const Size(double.infinity, 56),
+        minimumSize: const Size(double.infinity, AppConstants.buttonHeight + 6),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppConstants.defaultBorderRadius),
         ),
         elevation: 4,
         shadowColor: Colors.blue.withOpacity(0.3),

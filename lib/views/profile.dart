@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:darkord/consts/color.dart';
+import 'package:darkord/consts/app_constants.dart';
 import 'package:darkord/models/user.dart';
-import 'package:darkord/api/auth_api.dart';
+import 'package:darkord/api/api_service.dart';
+import 'package:darkord/widgets/common_widgets.dart';
 import 'package:provider/provider.dart';
-import 'package:darkord/api/auth_provider.dart'; // You'll need to create this
+import 'package:darkord/api/auth_provider.dart';
 
 class UserProfilePage extends StatefulWidget {
   final String userId;
@@ -19,7 +20,7 @@ class UserProfilePage extends StatefulWidget {
 
 class _UserProfilePageState extends State<UserProfilePage> {
   late Future<User> _futureUser;
-  final authApi = AuthApi();
+  final _apiService = ApiService();
 
   @override
   void initState() {
@@ -29,15 +30,15 @@ class _UserProfilePageState extends State<UserProfilePage> {
   }
 
   Future<User> _fetchUserData() async {
-    return await authApi.fetchUsers(widget.accessToken, widget.userId);
+    return await _apiService.fetchUsers(widget.accessToken, widget.userId);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: mainBGColor,
+      backgroundColor: AppConstants.mainBGColor,
       appBar: AppBar(
-        backgroundColor: mainBGColor,
+        backgroundColor: AppConstants.mainBGColor,
         elevation: 0,
         title: const Text(
           'Profile',
@@ -57,20 +58,18 @@ class _UserProfilePageState extends State<UserProfilePage> {
         future: _futureUser,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+            return const LoadingIndicator(message: 'Loading profile...');
           } else if (snapshot.hasError) {
-            return Center(
-              child: Text(
-                'Error: ${snapshot.error}',
-                style: const TextStyle(color: Colors.white),
-              ),
+            return EmptyState(
+              icon: Icons.error_outline,
+              title: 'Error',
+              subtitle: 'Error: ${snapshot.error}',
             );
           } else if (!snapshot.hasData) {
-            return const Center(
-              child: Text(
-                'No user data found',
-                style: TextStyle(color: Colors.white),
-              ),
+            return const EmptyState(
+              icon: Icons.person_off,
+              title: 'No user data found',
+              subtitle: 'Unable to load profile information',
             );
           }
 
@@ -119,7 +118,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
                             : Colors.grey,
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: mainBGColor,
+                          color: AppConstants.mainBGColor,
                           width: 3,
                         ),
                       ),
@@ -183,10 +182,10 @@ class _UserProfilePageState extends State<UserProfilePage> {
                 const SizedBox(height: 32),
                 // About me section
                 Container(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(AppConstants.defaultPadding),
                   decoration: BoxDecoration(
                     color: Colors.grey[900],
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(AppConstants.defaultBorderRadius),
                   ),
                   child: Row(
                     children: [
@@ -246,10 +245,10 @@ class _UserProfilePageState extends State<UserProfilePage> {
     required bool showCopy,
   }) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppConstants.defaultPadding),
       decoration: BoxDecoration(
         color: Colors.grey[900],
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppConstants.defaultBorderRadius),
       ),
       child: Row(
         children: [
