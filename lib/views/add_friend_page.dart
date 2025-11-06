@@ -9,12 +9,14 @@ class AddFriendPage extends StatefulWidget {
   final String accessToken;
   final Map<String, dynamic>? userData;
   final List<dynamic>? currentFriends; // Add this parameter
+  final AuthApi authApi; // Add this
 
   const AddFriendPage({
     super.key,
     required this.accessToken,
     this.userData,
     this.currentFriends, // Add this parameter
+    required this.authApi, // Add this
   });
 
   @override
@@ -25,7 +27,7 @@ class _AddFriendPageState extends State<AddFriendPage> {
   final TextEditingController _searchController = TextEditingController();
   String _currentStatus = 'online';
   final Set<int> _selectedIndices = {};
-  final AuthApi _authApi = AuthApi();
+  // final AuthApi _authApi = AuthApi();
 
   List<User> _nearbyUsers = [];
   List<User> _filteredNearbyUsers = []; // Add filtered list
@@ -39,6 +41,7 @@ class _AddFriendPageState extends State<AddFriendPage> {
       _currentStatus = widget.userData!['status'];
     }
     _fetchNearbyUsers();
+    widget.authApi.printTokenStatus();
   }
 
   @override
@@ -87,7 +90,7 @@ class _AddFriendPageState extends State<AddFriendPage> {
         _errorMessage = '';
       });
 
-      final users = await _authApi.findNearbyUsers(widget.accessToken);
+      final users = await widget.authApi.findNearbyUsers();
 
       // Filter out already friends
       _filterOutFriends(users);
@@ -153,7 +156,7 @@ class _AddFriendPageState extends State<AddFriendPage> {
         });
 
         // Make the actual API call with selected user IDs
-        await _authApi.addUsers(widget.accessToken,
+        await widget.authApi.addUsers(widget.authApi.accessToken!,
             widget.userData!['user_id'].toString(), selectedUserIds);
 
         // Show success message
@@ -171,6 +174,7 @@ class _AddFriendPageState extends State<AddFriendPage> {
           MaterialPageRoute(
             builder: (context) => ChatList(
               accessToken: widget.accessToken,
+              authApi: widget.authApi,
             ),
           ),
         );

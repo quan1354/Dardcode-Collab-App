@@ -6,15 +6,18 @@ import 'package:darkord/views/profile.dart';
 import 'package:darkord/views/add_friend_page.dart';
 import 'dart:convert';
 import 'package:darkord/views/messaging_page.dart';
+import 'package:darkord/views/login.dart';
 
 class ChatList extends StatefulWidget {
   final String accessToken;
   final Map<String, dynamic>? loginPayload;
+  final AuthApi authApi; // Add this
 
   const ChatList({
     super.key,
     required this.accessToken,
     this.loginPayload,
+    required this.authApi, // Add this
   });
 
   @override
@@ -24,7 +27,6 @@ class ChatList extends StatefulWidget {
 class _ChatListState extends State<ChatList> {
   String _currentStatus = 'online';
   Map<String, dynamic>? _userData;
-  final authApi = AuthApi();
   List<dynamic> _friendsList = [];
   List<dynamic> _filteredFriendsList = [];
   bool _isLoadingFriends = true;
@@ -39,20 +41,28 @@ class _ChatListState extends State<ChatList> {
   @override
   void initState() {
     super.initState();
-    if (widget.loginPayload != null) {
-      _extractChat(widget.loginPayload!);
-    } else if (widget.accessToken.isNotEmpty) {
-      // If we already have access token, fetch user data directly
-      _fetchUserDataWithToken(widget.accessToken);
-    }
+
+    _fetchUserDataWithToken(widget.accessToken);
+    widget.authApi.debugConnectionStatus();
+
+// No need to manually connect - it's already connected after login
+    // Just add message handlers
+    widget.authApi.addMessageHandler(_handleWebSocketMessage);
+    widget.authApi.getMessageHistory('10000048', '10000013').then((response) {
+      print('Messages History: ${response['message']}');
+    }).catchError((error) {
+      print('Error fetching messages history: $error');
+    });
   }
 
   @override
   void dispose() {
     _searchController.dispose();
+    widget.authApi.removeMessageHandler(_handleWebSocketMessage);
     super.dispose();
   }
 
+// ===================== COMMON FUNCTIONS =====================
   void _fetchUserDataWithToken(String accessToken) async {
     try {
       // Decode token to get user ID
@@ -65,7 +75,8 @@ class _ChatListState extends State<ChatList> {
       final String decodedJson = utf8.decode(base64Url.decode(paddedPayload));
       final Map<String, dynamic> tokenData = json.decode(decodedJson);
 
-      final user = await authApi.fetchUsers(accessToken, tokenData['sub']);
+      final user =
+          await widget.authApi.fetchUsers(accessToken, tokenData['sub']);
       setState(() {
         _userData = {
           'user_id': user.userId,
@@ -78,7 +89,7 @@ class _ChatListState extends State<ChatList> {
       });
 
       // Fetch friends after user data is loaded
-      _fetchFriends(accessToken, user.userId.toString());
+      _fetchCurrentUserFriends(accessToken, user.userId.toString());
     } catch (error) {
       print('Error fetching user data with token: $error');
       setState(() {
@@ -87,197 +98,9 @@ class _ChatListState extends State<ChatList> {
     }
   }
 
-  void _extractChat(Map<String, dynamic> payload) {
-    try {
-      final String accessToken = payload['payload']['access_token'];
-      final List<String> parts = accessToken.split('.');
-
-      final String payloadBase64 = parts[1];
-      String paddedPayload = payloadBase64;
-      while (paddedPayload.length % 4 != 0) {
-        paddedPayload += '=';
-      }
-
-      final String decodedJson = utf8.decode(base64Url.decode(paddedPayload));
-      final Map<String, dynamic> tokenData = json.decode(decodedJson);
-
-      print('\nDecoded JWT Payload:');
-      print('Subject (sub): ${tokenData['sub']}');
-      print('Expiration (exp): ${tokenData['exp']}');
-      print('Not Before (nbf): ${tokenData['nbf']}');
-      print('JWT ID (jti): ${tokenData['jti']}');
-      print('Family: ${tokenData['family']}');
-      print('Scope: ${tokenData['scope']}');
-
-      print(tokenData);
-
-      authApi.fetchUsers(accessToken, tokenData['sub']).then((user) {
-        setState(() {
-          _userData = {
-            'user_id': user.userId,
-            'username': user.username,
-            'email_addr': user.emailAddr,
-            'status': user.status,
-            'about_me': user.aboutMe,
-            'avatar_url': user.avatarUrl,
-          };
-          print(_userData);
-        });
-
-        // Fetch friends after user data is loaded
-        _fetchFriends(accessToken, user.userId.toString());
-      }).catchError((error) {
-        print('Error fetching user data: $error');
-      });
-    } catch (e) {
-      print('Error decoding JWT: $e');
-    }
-  }
-
-  void _fetchFriends(String accessToken, String userId) async {
-    try {
-      setState(() {
-        _isLoadingFriends = true;
-      });
-
-      print('Fetching friends for user: $userId with token: $accessToken');
-
-      final friendsResponse = await authApi.fetchChatUsers(accessToken, userId);
-      print('Fetch Users Response: $friendsResponse');
-
-      List<dynamic> results = [];
-
-      // Fixed: Handle different response structures
-      if (friendsResponse['data'] != null &&
-          friendsResponse['data']['payload'] != null &&
-          friendsResponse['data']['payload']['results'] is List) {
-        results = friendsResponse['data']['payload']['results'];
-      }
-      // Alternative path: check if response has payload directly
-      else if (friendsResponse['payload'] != null &&
-          friendsResponse['payload']['results'] is List) {
-        results = friendsResponse['payload']['results'];
-      }
-      // Another alternative: check if response has results directly
-      else if (friendsResponse['results'] is List) {
-        results = friendsResponse['results'];
-      } else {
-        print('No results found in response structure');
-        print('Available keys: ${friendsResponse.keys}');
-        results = [];
-      }
-
-      print('Extracted results: $results');
-      print('Results length: ${results.length}');
-
-      // Extract all friend user IDs for batch fetching
-      final friendUserIds = results
-          .map<String>((friend) => friend['user_id'].toString())
-          .where((id) => id.isNotEmpty)
-          .toList();
-
-      print('Friend user IDs to fetch: $friendUserIds');
-
-      if (friendUserIds.isNotEmpty) {
-        // Fetch all user details in a single batch request
-        await _fetchUserDetailsBatch(accessToken, friendUserIds);
-      }
-
-      setState(() {
-        _friendsList = results;
-        _filteredFriendsList = results; // Initialize filtered list
-        _isLoadingFriends = false;
-      });
-    } catch (error) {
-      print('Error fetching friends: $error');
-      setState(() {
-        _isLoadingFriends = false;
-      });
-    }
-  }
-
-  Future<void> _fetchUserDetailsBatch(
-      String accessToken, List<String> userIds) async {
-    try {
-      if (userIds.isEmpty) return;
-
-      // Join all user IDs with commas for the batch request
-      final userIdsString = userIds.join(',');
-      print('Batch fetching user details for IDs: $userIdsString');
-
-      final batchUserDetails = await authApi
-          .fetchUsers(accessToken, userIdsString, returnList: true);
-
-      // Process the batch response and update cache
-      for (var userData in batchUserDetails) {
-        final userId = userData['identity']['user_id'].toString();
-        setState(() {
-          _userDetailsCache[userId] = {
-            'username': userData['identity']['username'] ?? 'Unknown User',
-            'avatar_url': userData['identity']['avatar_url'],
-            'status': userData['status']['status'],
-          };
-        });
-        print(
-            'Cached user details for $userId: ${userData['identity']['username']}');
-      }
-    } catch (e) {
-      print('Error in batch user details fetch: $e');
-      // Fallback: try individual requests if batch fails
-      await _fetchUserDetailsIndividualFallback(accessToken, userIds);
-    }
-  }
-
-  Future<void> _fetchUserDetailsIndividualFallback(
-      String accessToken, List<String> userIds) async {
-    // Fallback to individual requests if batch fails
-    for (var userId in userIds) {
-      if (!_userDetailsCache.containsKey(userId)) {
-        try {
-          final userDetails = await authApi.fetchUsers(accessToken, userId);
-          setState(() {
-            _userDetailsCache[userId] = {
-              'username': userDetails.username ?? 'Unknown User',
-              'avatar_url': userDetails.avatarUrl,
-              'status': userDetails.status,
-            };
-          });
-          print('Fetched user details for $userId: ${userDetails.username}');
-        } catch (e) {
-          print('Error fetching user details for $userId: $e');
-          setState(() {
-            _userDetailsCache[userId] = {
-              'username': 'User $userId',
-              'avatar_url': null,
-              'status': null,
-            };
-          });
-        }
-      }
-    }
-  }
-
-  void _filterChats(String query) {
-    setState(() {
-      _searchQuery = query.toLowerCase().trim();
-
-      if (_searchQuery.isEmpty) {
-        _filteredFriendsList = _friendsList;
-      } else {
-        _filteredFriendsList = _friendsList.where((friend) {
-          final friendUserId = friend['user_id'].toString();
-          final userDetails = _userDetailsCache[friendUserId];
-          final username = userDetails?['username']?.toLowerCase() ?? '';
-          final lastMessage =
-              _getLastMessage(friend['last_message']).toLowerCase();
-
-          // Search by username or last message
-          return username.contains(_searchQuery) ||
-              lastMessage.contains(_searchQuery) ||
-              friendUserId.contains(_searchQuery);
-        }).toList();
-      }
-    });
+  void _handleWebSocketMessage(dynamic message) {
+    // Handle global WebSocket messages
+    print('Global message: $message');
   }
 
   String _formatLastChatTime(dynamic lastChatAt) {
@@ -321,69 +144,161 @@ class _ChatListState extends State<ChatList> {
     return lastMessage.toString();
   }
 
-  Widget _buildChatListItem(Map<String, dynamic> friend) {
-    print(_userDetailsCache);
-    final friendUserId = friend['user_id'].toString();
-    final userDetails = _userDetailsCache[friendUserId];
-    final username = userDetails?['username'] ?? 'User $friendUserId';
-    final avatarUrl = userDetails?['avatar_url'];
-    final status = userDetails?['status'];
-    final lastMessage = _getLastMessage(friend['last_message']);
-    final lastChatTime = _formatLastChatTime(friend['last_chat_at']);
+  void _filterChats(String query) {
+    setState(() {
+      _searchQuery = query.toLowerCase().trim();
 
-    return ListTile(
-      leading: GestureDetector(
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => UserProfilePage(
-                userId: friendUserId,
-                accessToken: widget.accessToken,
-              ),
-            ),
-          );
-        },
-        child: CircleAvatar(
-          backgroundColor: Colors.grey,
-          backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
-          child: avatarUrl == null
-              ? const Icon(Icons.person, color: Colors.white)
-              : null,
-        ),
-      ),
-      title: Text(
-        username,
-        style: const TextStyle(color: Colors.white),
-      ),
-      subtitle: Text(
-        lastMessage,
-        style: const TextStyle(color: Colors.grey),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-      trailing: Text(
-        lastChatTime,
-        style: const TextStyle(color: Colors.grey, fontSize: 12),
-      ),
-      onTap: () {
-        // Navigate to messaging page when clicking on a friend
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => MessagingPage(
-              accessToken: widget.accessToken,
-              friendId: friendUserId,
-              friendUsername: username,
-              friendAvatarUrl: avatarUrl,
-              friendStatus: status,
-            ),
-          ),
-        );
-      },
-    );
+      if (_searchQuery.isEmpty) {
+        _filteredFriendsList = _friendsList;
+      } else {
+        _filteredFriendsList = _friendsList.where((friend) {
+          final friendUserId = friend['user_id'].toString();
+          final userDetails = _userDetailsCache[friendUserId];
+          final username = userDetails?['username']?.toLowerCase() ?? '';
+          final lastMessage =
+              _getLastMessage(friend['last_message']).toLowerCase();
+
+          // Search by username or last message
+          return username.contains(_searchQuery) ||
+              lastMessage.contains(_searchQuery) ||
+              friendUserId.contains(_searchQuery);
+        }).toList();
+      }
+    });
   }
 
+  void _navigateToAddFriend() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => AddFriendPage(
+            accessToken: widget.accessToken,
+            userData: _userData,
+            currentFriends: _friendsList, // Pass current friends list
+            authApi: widget.authApi),
+      ),
+    ).then((_) {
+      // Refresh friends list when returning from AddFriendPage
+      if (_userData != null && _userData!['user_id'] != null) {
+        print('Refreshing friends list after returning from AddFriendPage');
+        _fetchCurrentUserFriends(
+            widget.accessToken, _userData!['user_id'].toString());
+      }
+    });
+  }
+
+// ===================== LOAD CURRENT USER FRIENDS =====================
+  void _fetchCurrentUserFriends(String accessToken, String userId) async {
+    try {
+      setState(() {
+        _isLoadingFriends = true;
+      });
+
+      print('Fetching friends for user: $userId with token: $accessToken');
+
+      final friendsResponse =
+          await widget.authApi.fetchChatUsers(accessToken, userId);
+      print('Fetch Users Response: $friendsResponse');
+
+      List<dynamic> results = [];
+
+      // Fixed: Handle different response structures
+      if (friendsResponse['data']['payload']['results'] is List) {
+        results = friendsResponse['data']['payload']['results'];
+      }
+
+      print('Extracted results: $results');
+      print('Results length: ${results.length}');
+
+      // Extract all friend user IDs for batch fetching
+      final friendUserIds = results
+          .map<String>((friend) => friend['user_id'].toString())
+          .where((id) => id.isNotEmpty)
+          .toList();
+
+      print('Friend user IDs to fetch: $friendUserIds');
+
+      if (friendUserIds.isNotEmpty) {
+        // Fetch all user details in a single batch request
+        await _fetchUserDetailsBatch(accessToken, friendUserIds);
+      }
+
+      setState(() {
+        _friendsList = results;
+        _filteredFriendsList = results; // Initialize filtered list
+        _isLoadingFriends = false;
+      });
+    } catch (error) {
+      print('Error fetching friends: $error');
+      setState(() {
+        _isLoadingFriends = false;
+      });
+    }
+  }
+
+  Future<void> _fetchUserDetailsBatch(
+      String accessToken, List<String> userIds) async {
+    try {
+      if (userIds.isEmpty) return;
+
+      // Join all user IDs with commas for the batch request
+      final userIdsString = userIds.join(',');
+      print('Batch fetching user details for IDs: $userIdsString');
+
+      final batchUserDetails = await widget.authApi
+          .fetchUsers(accessToken, userIdsString, returnList: true);
+
+      // Process the batch response and update cache
+      for (var userData in batchUserDetails) {
+        final userId = userData['identity']['user_id'].toString();
+        setState(() {
+          _userDetailsCache[userId] = {
+            'username': userData['identity']['username'] ?? 'Unknown User',
+            'avatar_url': userData['identity']['avatar_url'],
+            'status': userData['status']['status'],
+          };
+        });
+        print(
+            'Cached user details for $userId: ${userData['identity']['username']}');
+      }
+    } catch (e) {
+      print('Error in batch user details fetch: $e');
+      // Fallback: try individual requests if batch fails
+      await _fetchUserDetailsIndividualFallback(accessToken, userIds);
+    }
+  }
+
+  Future<void> _fetchUserDetailsIndividualFallback(
+      String accessToken, List<String> userIds) async {
+    // Fallback to individual requests if batch fails
+    for (var userId in userIds) {
+      if (!_userDetailsCache.containsKey(userId)) {
+        try {
+          final userDetails =
+              await widget.authApi.fetchUsers(accessToken, userId);
+          setState(() {
+            _userDetailsCache[userId] = {
+              'username': userDetails.username ?? 'Unknown User',
+              'avatar_url': userDetails.avatarUrl,
+              'status': userDetails.status,
+            };
+          });
+          print('Fetched user details for $userId: ${userDetails.username}');
+        } catch (e) {
+          print('Error fetching user details for $userId: $e');
+          setState(() {
+            _userDetailsCache[userId] = {
+              'username': 'User $userId',
+              'avatar_url': null,
+              'status': null,
+            };
+          });
+        }
+      }
+    }
+  }
+
+// ==================== WIDGETS PARTS =====================
   Widget _buildLoadingIndicator() {
     return Center(
       child: Column(
@@ -494,26 +409,6 @@ class _ChatListState extends State<ChatList> {
     );
   }
 
-  void _navigateToAddFriend() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => AddFriendPage(
-          accessToken: widget.accessToken,
-          userData: _userData,
-          currentFriends: _friendsList, // Pass current friends list
-        ),
-      ),
-    ).then((_) {
-      // Refresh friends list when returning from AddFriendPage
-      if (_userData != null && _userData!['user_id'] != null) {
-        print('Refreshing friends list after returning from AddFriendPage');
-        _fetchFriends(widget.accessToken, _userData!['user_id'].toString());
-      }
-    });
-  }
-
-  // Community Page (Placeholder)
   Widget _buildCommunityPage() {
     return Scaffold(
       backgroundColor: mainBGColor,
@@ -549,7 +444,6 @@ class _ChatListState extends State<ChatList> {
     );
   }
 
-  // Settings Page (Placeholder)
   Widget _buildSettingsPage() {
     return Scaffold(
       backgroundColor: mainBGColor,
@@ -585,7 +479,6 @@ class _ChatListState extends State<ChatList> {
     );
   }
 
-  // Main Messages Page
   Widget _buildMessagesPage() {
     return CustomScrollView(
       slivers: [
@@ -616,7 +509,7 @@ class _ChatListState extends State<ChatList> {
           actions: [
             IconButton(
               icon: const Icon(Icons.smart_toy_outlined, color: Colors.white),
-              onPressed: (){},
+              onPressed: () {},
               tooltip: 'Chatbot',
             ),
             // Add Friend button moved to top bar
@@ -694,17 +587,6 @@ class _ChatListState extends State<ChatList> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: mainBGColor,
-      drawer: _buildUserDrawer(),
-      // Remove floating action button since it's moved to app bar
-      body: _buildCurrentPage(),
-      bottomNavigationBar: _buildBottomNavigationBar(),
-    );
-  }
-
   Widget _buildCurrentPage() {
     switch (_currentIndex) {
       case 0:
@@ -716,66 +598,6 @@ class _ChatListState extends State<ChatList> {
       default:
         return _buildMessagesPage();
     }
-  }
-
-  Widget _buildBottomNavigationBar() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.grey[900],
-        border: Border(
-          top: BorderSide(color: Colors.grey[800]!, width: 1),
-        ),
-      ),
-      child: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: (index) {
-          setState(() {
-            _currentIndex = index;
-          });
-        },
-        backgroundColor: Colors.grey[900],
-        selectedItemColor: Colors.blue[400],
-        unselectedItemColor: Colors.grey[500],
-        selectedLabelStyle: TextStyle(fontSize: 12),
-        unselectedLabelStyle: TextStyle(fontSize: 12),
-        type: BottomNavigationBarType.fixed,
-        // Add these properties to remove the splash/ripple effect
-        enableFeedback: false, // Disables haptic feedback
-        // Use custom icon widgets to remove splash effect
-        items: [
-          BottomNavigationBarItem(
-            icon: Container(
-              padding: EdgeInsets.all(8),
-              child: Icon(
-                Icons.chat,
-                color: _currentIndex == 0 ? Colors.blue[400] : Colors.grey[500],
-              ),
-            ),
-            label: 'Messages',
-          ),
-          BottomNavigationBarItem(
-            icon: Container(
-              padding: EdgeInsets.all(8),
-              child: Icon(
-                Icons.people,
-                color: _currentIndex == 1 ? Colors.blue[400] : Colors.grey[500],
-              ),
-            ),
-            label: 'Community',
-          ),
-          BottomNavigationBarItem(
-            icon: Container(
-              padding: EdgeInsets.all(8),
-              child: Icon(
-                Icons.settings,
-                color: _currentIndex == 2 ? Colors.blue[400] : Colors.grey[500],
-              ),
-            ),
-            label: 'Settings',
-          ),
-        ],
-      ),
-    );
   }
 
   Widget _buildUserDrawer() {
@@ -985,8 +807,32 @@ class _ChatListState extends State<ChatList> {
                 ),
                 const SizedBox(height: 8.0),
                 ElevatedButton.icon(
-                  onPressed: () {
-                    Navigator.pop(context);
+                  onPressed: () async {
+                    print('Logging out user');
+
+                    try {
+                      // Add 'await' and make the callback 'async'
+                      final response =
+                          await widget.authApi.logoutUser(widget.accessToken);
+
+                      if (response['success'] == true) {
+                        Navigator.pushAndRemoveUntil(
+                          context,
+                          MaterialPageRoute(builder: (context) => LoginForm()),
+                          (route) => false,
+                        );
+                      } else {
+                        // Optional: Handle unsuccessful logout
+                        print('Logout failed: ${response['message']}');
+                      }
+                    } catch (e) {
+                      // Handle any errors that occur during logout
+                      print('Error during logout: $e');
+                      // Optional: Show error message to user
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Logout failed: $e')),
+                      );
+                    }
                   },
                   icon: const Icon(Icons.logout, color: Colors.white),
                   label: const Text('Logout',
@@ -1009,34 +855,135 @@ class _ChatListState extends State<ChatList> {
     );
   }
 
-  Widget _buildInfoRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: Row(
-        children: [
-          Text(
-            '$label: ',
-            style: const TextStyle(
-              color: Colors.grey,
-              fontSize: 14,
+  Widget _buildBottomNavigationBar() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.grey[900],
+        border: Border(
+          top: BorderSide(color: Colors.grey[800]!, width: 1),
+        ),
+      ),
+      child: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        onTap: (index) {
+          setState(() {
+            _currentIndex = index;
+          });
+        },
+        backgroundColor: Colors.grey[900],
+        selectedItemColor: Colors.blue[400],
+        unselectedItemColor: Colors.grey[500],
+        selectedLabelStyle: TextStyle(fontSize: 12),
+        unselectedLabelStyle: TextStyle(fontSize: 12),
+        type: BottomNavigationBarType.fixed,
+        // Add these properties to remove the splash/ripple effect
+        enableFeedback: false, // Disables haptic feedback
+        // Use custom icon widgets to remove splash effect
+        items: [
+          BottomNavigationBarItem(
+            icon: Container(
+              padding: EdgeInsets.all(8),
+              child: Icon(
+                Icons.chat,
+                color: _currentIndex == 0 ? Colors.blue[400] : Colors.grey[500],
+              ),
             ),
+            label: 'Messages',
           ),
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 14,
+          BottomNavigationBarItem(
+            icon: Container(
+              padding: EdgeInsets.all(8),
+              child: Icon(
+                Icons.people,
+                color: _currentIndex == 1 ? Colors.blue[400] : Colors.grey[500],
+              ),
             ),
+            label: 'Community',
+          ),
+          BottomNavigationBarItem(
+            icon: Container(
+              padding: EdgeInsets.all(8),
+              child: Icon(
+                Icons.settings,
+                color: _currentIndex == 2 ? Colors.blue[400] : Colors.grey[500],
+              ),
+            ),
+            label: 'Settings',
           ),
         ],
       ),
     );
   }
 
-  String _formatDate(dynamic date) {
-    if (date is String) {
-      return date;
-    }
-    return 'Unknown date';
+  Widget _buildChatListItem(Map<String, dynamic> friend) {
+    final friendUserId = friend['user_id'].toString();
+    final userDetails = _userDetailsCache[friendUserId];
+    final username = userDetails?['username'] ?? 'User $friendUserId';
+    final avatarUrl = userDetails?['avatar_url'];
+    final status = userDetails?['status'];
+
+    return ListTile(
+      leading: GestureDetector(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => UserProfilePage(
+                userId: friendUserId,
+                accessToken: widget.accessToken,
+              ),
+            ),
+          );
+        },
+        child: CircleAvatar(
+          backgroundColor: Colors.grey,
+          backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
+          child: avatarUrl == null
+              ? const Icon(Icons.person, color: Colors.white)
+              : null,
+        ),
+      ),
+      title: Text(
+        username,
+        style: const TextStyle(color: Colors.white),
+      ),
+      subtitle: Text(
+        _getLastMessage(friend['last_message']?['message']?['text']),
+        style: const TextStyle(color: Colors.grey),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      trailing: Text(
+        _formatLastChatTime(friend['last_chat_at']),
+        style: const TextStyle(color: Colors.grey, fontSize: 12),
+      ),
+      onTap: () {
+        // Navigate to messaging page with all required parameters
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => MessagingPage(
+              accessToken: widget.accessToken,
+              friendId: friendUserId,
+              friendUsername: username,
+              friendAvatarUrl: avatarUrl,
+              friendStatus: status ?? 'offline',
+              authApi: widget.authApi,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: mainBGColor,
+      drawer: _buildUserDrawer(),
+      // Remove floating action button since it's moved to app bar
+      body: _buildCurrentPage(),
+      bottomNavigationBar: _buildBottomNavigationBar(),
+    );
   }
 }

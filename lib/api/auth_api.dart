@@ -1,32 +1,62 @@
-// api.dart
 import 'dart:convert';
 import 'package:darkord/models/user.dart';
 import 'package:http/http.dart' as http;
-import '../models/auth_response.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart';
-import 'dart:convert';
 import 'dart:async';
 
 class AuthApi {
+  static final AuthApi _instance = AuthApi._internal();
+  factory AuthApi() => _instance;
+  AuthApi._internal(); // Private constructor
+
   static const String _baseUrl = 'https://d3v904dal0xey8.cloudfront.net';
   String? _accessToken;
   String? _refreshToken;
+  String? _sessionToken;
 
   String? get accessToken => _accessToken;
   String? get refreshToken => _refreshToken;
+  String? get sessionToken => _sessionToken;
 
+  // WebSocket management
   WebSocketChannel? _webSocketChannel;
   WebSocketChannel? get webSocketChannel => _webSocketChannel;
   Timer? _typingTimer;
   bool _isTyping = false;
+  bool _isConnected = false;
+
+  // Message handlers for global message distribution
+  final List<Function(dynamic)> _messageHandlers = [];
+  final List<Function()> _connectionHandlers = [];
+  final List<Function()> _disconnectionHandlers = [];
+
+  set sessionToken(String? token) {
+    _sessionToken = token;
+    print('Session token ${token != null ? 'set' : 'cleared'}');
+  }
+
+  set accessToken(String? token) {
+    _accessToken = token;
+    print('Access token ${token != null ? 'set' : 'cleared'}');
+  }
+
+  set refreshToken(String? token) {
+    _refreshToken = token;
+    print('Refresh token ${token != null ? 'set' : 'cleared'}');
+  }
+
+  void clearTokens() {
+    _accessToken = null;
+    _refreshToken = null;
+    _sessionToken = null;
+    print('All tokens cleared');
+  }
 
   Future<Map<String, dynamic>> login(String email, String password) async {
     try {
       print(email);
       print(password);
-      // email = 'ii887522@gmail.com';
-      // password = 'ii887522@gmail.com';
       final url = Uri.parse('$_baseUrl/user/login');
       final url_mfa = Uri.parse('$_baseUrl/user/login/mfa');
 
@@ -42,15 +72,14 @@ class AuthApi {
       );
 
       final responseData = jsonDecode(response.body);
-      print(responseData);
 
       if (response.statusCode != 200) {
         throw Exception(responseData['message'] ?? 'Login failed');
       }
 
+      // ✅ Store session token using setter
       final sessionToken = responseData['payload']['session_token'];
-      //final mfa_secret = responseData['payload']['mfa_secret'];
-      //print(sessionToken);
+      this.sessionToken = sessionToken;
 
       final responseMfa = await http.post(
         url_mfa,
@@ -62,14 +91,20 @@ class AuthApi {
       );
 
       final mfaData = jsonDecode(responseMfa.body) as Map<String, dynamic>;
-      // print(mfaData);
 
-      _accessToken = mfaData['payload']['access_token'];
-      print(accessToken);
-      // _refreshToken = responseData['payload']['refresh_token'];
+      // ✅ Store access and refresh tokens using setters
+      accessToken = mfaData['payload']['access_token'];
+      refreshToken = mfaData['payload']['refresh_token'];
+
+      print('login mfaData: $mfaData');
+
+      // Connect WebSocket automatically after successful login
+      await connectToWebSocket(accessToken!);
+
       return mfaData;
-      //return AuthResponse.fromJson(responseData);f
     } catch (e) {
+      // Clear tokens on login failure
+      clearTokens();
       throw Exception('Login error: ${e.toString()}');
     }
   }
@@ -131,9 +166,7 @@ class AuthApi {
       }
 
       // Step 3: Complete MFA verification
-      // In a real app, you would get this from user input
-      final mfaCode =
-          otpData['payload']?['mfa_secret']; // This should come from user input
+      final mfaCode = otpData['payload']?['mfa_secret'];
       print(mfaCode);
       final mfaResponse = await http.post(
         signUpMfaUrl,
@@ -409,20 +442,18 @@ class AuthApi {
     }
   }
 
-  Future<List<User>> findNearbyUsers(String accessToken) async {
-    try {
+  Future<List<User>> findNearbyUsers() async {
+    return await retryWithTokenRefresh(() async {
       final uri = Uri.parse('$_baseUrl/user/list');
-
       final response = await http.get(
         uri,
         headers: {
-          'Authorization': accessToken,
+          'Authorization': accessToken!,
         },
       );
 
       if (response.statusCode == 200) {
         final responseData = jsonDecode(response.body) as Map<String, dynamic>;
-        // print(responseData);
 
         if (responseData['payload'] != null &&
             responseData['payload']['results'] != null) {
@@ -434,9 +465,7 @@ class AuthApi {
       } else {
         throw Exception('Failed to fetch users: ${response.statusCode}');
       }
-    } catch (e) {
-      throw Exception('Error fetching users: $e');
-    }
+    });
   }
 
   Future<Map<String, dynamic>> addUsers(
@@ -466,7 +495,6 @@ class AuthApi {
     }
   }
 
-  // Enhanced version that can handle both single and multiple users
   Future<dynamic> fetchUsers(String accessToken, String userIds,
       {bool returnList = false}) async {
     try {
@@ -539,6 +567,36 @@ class AuthApi {
     }
   }
 
+  Future<Map<String, dynamic>> getMessageHistory(
+       user_id, other_user_id) async {
+    try {
+
+
+      final addUsersUrl =
+          Uri.parse('$_baseUrl/chat/$user_id/$other_user_id/messages');
+
+      final response = await http.get(
+        addUsersUrl,
+        headers: {
+          'Authorization': accessToken!,
+          'Content-Type': 'application/json',
+        },
+      );
+
+      final responseData = jsonDecode(response.body) as Map<String, dynamic>;
+      print('Get Messages History Response: $responseData');
+
+      if (response.statusCode != 200) {
+        throw Exception(
+            'Get Messages History Response failed: ${responseData['message']}');
+      }
+
+      return {'success': true, 'message': responseData};
+    } catch (e) {
+      throw Exception('WebSocket token error: ${e.toString()}');
+    }
+  }
+
   Future<String> getWebSocketToken(accessToken) async {
     try {
       if (accessToken == null) {
@@ -573,8 +631,39 @@ class AuthApi {
     }
   }
 
+  void checkConnectionHealth() {
+    if (_webSocketChannel != null && _isConnected) {
+      print('WebSocket connection is healthy');
+    } else {
+      print(
+          'WebSocket connection issues: channel=${_webSocketChannel != null}, connected=$_isConnected');
+    }
+  }
+
+  /// Handle incoming WebSocket messages and distribute to handlers
+  void _handleIncomingMessage(dynamic message) {
+    try {
+      print('Received WebSocket message: $message');
+      final decodedMessage = json.decode(message);
+
+      // Notify all registered message handlers
+      for (final handler in _messageHandlers) {
+        handler(decodedMessage);
+      }
+    } catch (e) {
+      print('Error processing incoming message: $e');
+    }
+  }
+
   Future<WebSocketChannel> connectToWebSocket(String accessToken) async {
     try {
+      if (_webSocketChannel != null) {
+        _webSocketChannel!.sink.close();
+        _webSocketChannel = null;
+      }
+
+      _isConnected = false; // Reset connection status
+
       // Get WebSocket token first
       final wsToken = await getWebSocketToken(accessToken);
 
@@ -584,14 +673,38 @@ class AuthApi {
       );
 
       _webSocketChannel = channel;
+
+      // Set up listeners first
+      channel.stream.listen(
+        _handleIncomingMessage,
+        onError: (error) {
+          print('WebSocket error: $error');
+          _isConnected = false;
+          _notifyDisconnectionHandlers();
+        },
+        onDone: () {
+          print('WebSocket connection closed');
+          _isConnected = false;
+          _notifyDisconnectionHandlers();
+        },
+      );
+
+      // Set connected status after successful connection
+      _isConnected = true;
+      _notifyConnectionHandlers();
+
+      print('WebSocket connected successfully');
       return channel;
     } catch (e) {
-      throw Exception('WebSocket connection failed: $e');
+      _isConnected = false;
+      print('WebSocket connection failed: $e');
+      rethrow;
     }
   }
 
+  /// Send message via WebSocket
   void sendMessage(String accessToken, String message, String otherUserId) {
-    if (_webSocketChannel == null) {
+    if (_webSocketChannel == null || !_isConnected) {
       throw Exception('WebSocket not connected');
     }
 
@@ -607,8 +720,9 @@ class AuthApi {
     _webSocketChannel!.sink.add(jsonMessage);
   }
 
+  /// Typing indicators
   void startTyping(String accessToken, String otherUserId) {
-    if (_webSocketChannel == null) {
+    if (_webSocketChannel == null || !_isConnected) {
       throw Exception('WebSocket not connected');
     }
 
@@ -645,16 +759,256 @@ class AuthApi {
     print('Typing stopped for $otherUserId');
   }
 
-  // Call this when user sends a message or explicitly stops typing
   void stopTyping() {
     _isTyping = false;
     _typingTimer?.cancel();
   }
 
+  /// Disconnect WebSocket (call on logout)
   void disconnectWebSocket() {
     _typingTimer?.cancel();
     _isTyping = false;
+    _isConnected = false;
     _webSocketChannel?.sink.close();
     _webSocketChannel = null;
+
+    // Clear all handlers
+    _messageHandlers.clear();
+    _connectionHandlers.clear();
+    _disconnectionHandlers.clear();
+
+    print('WebSocket disconnected and cleaned up');
+  }
+
+  // ==================== MESSAGE HANDLER MANAGEMENT ====================
+
+  /// Register a message handler (for MessagingPage, ChatList, etc.)
+  void addMessageHandler(Function(dynamic) handler) {
+    if (!_messageHandlers.contains(handler)) {
+      _messageHandlers.add(handler);
+    }
+  }
+
+  /// Remove a message handler
+  void removeMessageHandler(Function(dynamic) handler) {
+    _messageHandlers.remove(handler);
+  }
+
+  /// Register connection handler
+  void addConnectionHandler(Function() handler) {
+    if (!_connectionHandlers.contains(handler)) {
+      _connectionHandlers.add(handler);
+    }
+  }
+
+  /// Register disconnection handler
+  void addDisconnectionHandler(Function() handler) {
+    if (!_disconnectionHandlers.contains(handler)) {
+      _disconnectionHandlers.add(handler);
+    }
+  }
+
+  void _notifyConnectionHandlers() {
+    for (final handler in _connectionHandlers) {
+      handler();
+    }
+  }
+
+  void _notifyDisconnectionHandlers() {
+    for (final handler in _disconnectionHandlers) {
+      handler();
+    }
+  }
+
+  /// Check if user is authenticated (has access token)
+  bool get isAuthenticated => _accessToken != null && _accessToken!.isNotEmpty;
+
+  /// Check if refresh token is available
+  bool get canRefreshToken =>
+      _refreshToken != null && _refreshToken!.isNotEmpty;
+
+  Future<Map<String, dynamic>> logoutUser(String accessToken) async {
+    try {
+      final logoutUserUrl = Uri.parse('$_baseUrl/user/logout');
+
+      final response = await http.post(
+        logoutUserUrl,
+        headers: {
+          'Authorization': accessToken,
+          'Content-Type': 'application/json',
+        },
+      );
+
+      final responseData = jsonDecode(response.body) as Map<String, dynamic>;
+      print('LogOut Response: $responseData');
+
+      if (response.statusCode != 200) {
+        throw Exception('LogOut failed: ${responseData['message']}');
+      }
+
+      // Disconnect WebSocket on logout
+      disconnectWebSocket();
+
+      // ✅ Clear all tokens using the clear method
+      clearTokens();
+
+      return {'success': true, 'message': 'LogOut successfully'};
+    } catch (e) {
+      throw Exception('LogOut error: $e');
+    }
+  }
+
+  /// Get all tokens as a map for easy storage/retrieval
+  Map<String, String?> get tokens => {
+        'accessToken': _accessToken,
+        'refreshToken': _refreshToken,
+        'sessionToken': _sessionToken,
+      };
+
+  /// Set all tokens from a map
+  void setTokens(Map<String, String?> tokens) {
+    _accessToken = tokens['accessToken'];
+    _refreshToken = tokens['refreshToken'];
+    _sessionToken = tokens['sessionToken'];
+    print('All tokens set from storage');
+  }
+
+  /// Print token status for debugging
+  void printTokenStatus() {
+    print('=== Token Status ===');
+    print(
+        'Access Token: ${accessToken != null ? 'Present (${accessToken!.substring(0, 20)}...)' : 'Missing'}');
+    print(
+        'Refresh Token: ${refreshToken != null ? 'Present (${refreshToken!.substring(0, 20)}...)' : 'Missing'}');
+    print(
+        'Session Token: ${sessionToken != null ? 'Present (${sessionToken!.substring(0, 20)}...)' : 'Missing'}');
+    print('Authenticated: $isAuthenticated');
+    print('Can Refresh: $canRefreshToken');
+    print('====================');
+  }
+
+  Map<String, dynamic>? decodeJwt(String token) {
+    try {
+      final parts = token.split('.');
+      if (parts.length != 3) {
+        throw Exception('Invalid token format');
+      }
+
+      final payload = parts[1];
+      // Add padding if needed
+      var normalizedPayload = base64Url.normalize(payload);
+      final decoded = utf8.decode(base64Url.decode(normalizedPayload));
+
+      return json.decode(decoded) as Map<String, dynamic>;
+    } catch (e) {
+      print('Error decoding JWT: $e');
+      return null;
+    }
+  }
+
+  /// Extract user_id from access token
+  String? get userIdFromToken {
+    if (_accessToken == null) return null;
+
+    final decoded = decodeJwt(_accessToken!);
+    return decoded?['sub'] as String?; // 'sub' usually contains user_id in JWT
+  }
+
+  Future<Map<String, dynamic>> refreshtoken() async {
+    try {
+      if (!canRefreshToken) {
+        throw Exception('No refresh token available');
+      }
+
+      // Extract user_id from current access token
+      final userId = userIdFromToken;
+      if (userId == null) {
+        throw Exception('Could not extract user_id from access token');
+      }
+
+      final refreshUrl = Uri.parse('$_baseUrl/user/token');
+
+      print('Refreshing token for user: $userId');
+      print('Using refresh token: ${refreshToken!.substring(0, 20)}...');
+
+      final response = await http.post(
+        refreshUrl,
+        headers: {
+          'Authorization': refreshToken!,
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'user_id': userId, // Now including the user_id from the token
+        }),
+      );
+
+      final responseData = jsonDecode(response.body) as Map<String, dynamic>;
+      print('Refresh Token Response: $responseData');
+
+      if (response.statusCode != 200) {
+        throw Exception('Refresh Token failed: ${responseData['message']}');
+      }
+
+      // ✅ Update tokens with new ones from response
+      if (responseData['payload'] != null) {
+        accessToken = responseData['payload']['access_token'];
+        refreshToken = responseData['payload']['refresh_token'];
+
+        print('Tokens refreshed successfully');
+        printTokenStatus();
+      }
+
+      return {
+        'success': true,
+        'message': 'Token refreshed successfully',
+        'access_token': accessToken,
+        'refresh_token': refreshToken
+      };
+    } catch (e) {
+      print('Token refresh error: $e');
+      // Clear tokens if refresh fails
+      clearTokens();
+      throw Exception('Token refresh failed: ${e.toString()}');
+    }
+  }
+
+  /// Helper method to refresh token and retry failed API calls
+  Future<T> retryWithTokenRefresh<T>(Future<T> Function() apiCall) async {
+    try {
+      return await apiCall();
+    } catch (e) {
+      // Check if it's an authentication error (401)
+      if (e.toString().contains('401') && canRefreshToken) {
+        print('Authentication error detected, attempting token refresh...');
+
+        try {
+          // Refresh the token
+          await refreshtoken();
+
+          // Retry the original API call with new token
+          print('Retrying API call with refreshed token...');
+          return await apiCall();
+        } catch (refreshError) {
+          print('Token refresh failed: $refreshError');
+          clearTokens();
+          rethrow;
+        }
+      }
+      rethrow;
+    }
+  }
+
+  // ==================== GETTERS ====================
+  bool get isWebSocketConnected {
+    return _isConnected && _webSocketChannel != null;
+  }
+
+  WebSocketChannel? get currentWebSocketChannel => _webSocketChannel;
+
+  // Add to AuthApi class
+  void debugConnectionStatus() {
+    print('=== WebSocket Connection Debug ===');
+    print('_isConnected: $_isConnected');
+    print('_webSocketChannel: ${_webSocketChannel != null}');
   }
 }

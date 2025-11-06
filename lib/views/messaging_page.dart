@@ -12,6 +12,7 @@ class MessagingPage extends StatefulWidget {
   final String friendUsername;
   final String? friendAvatarUrl;
   final String friendStatus;
+  final AuthApi authApi; // Add this parameter
 
   const MessagingPage({
     super.key,
@@ -20,6 +21,7 @@ class MessagingPage extends StatefulWidget {
     required this.friendUsername,
     this.friendAvatarUrl,
     required this.friendStatus,
+    required this.authApi, // Add this parameter
   });
 
   @override
@@ -29,28 +31,160 @@ class MessagingPage extends StatefulWidget {
 class _MessagingPageState extends State<MessagingPage> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  final AuthApi _authApi = AuthApi();
+
+  // Add these variables for chat history
+  List<Map<String, dynamic>> _messages = [];
+  bool _isLoadingHistory = true;
+  bool _hasMoreMessages = true;
+  String? _lastMessageId;
 
   WebSocketChannel? _channel;
   bool _isConnected = false;
   bool _isConnecting = false;
-  bool _isDisposed = false; // Add this flag
+  bool _isDisposed = false;
 
   Timer? _typingDebounceTimer;
   bool _isUserTyping = false;
 
-  // Messages list - now with real WebSocket integration
-  List<Map<String, dynamic>> _messages = [];
-
   @override
   void initState() {
     super.initState();
-    _connectToWebSocket();
 
-    // Scroll to bottom when page loads
+    // Fetch chat history when page loads
+    _fetchChatHistory();
+
+    _setupWebSocketListeners();
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scrollToBottom();
     });
+
+    _logConnectionStatus();
+  }
+
+  Future<void> _fetchChatHistory() async {
+    try {
+      setState(() {
+        _isLoadingHistory = true;
+      });
+
+      // Get current user ID from token
+      final currentUserId = _getUserIdFromToken(widget.accessToken);
+      if (currentUserId == null) {
+        throw Exception('Could not get current user ID from token');
+      }
+
+      // Fetch message history
+      final response = await widget.authApi
+          .getMessageHistory(currentUserId, widget.friendId);
+
+      if (response['success'] == true) {
+        final messageData = response['message'];
+        final results = messageData['payload']['results'] as List<dynamic>;
+
+        // Convert API response to message format
+        final List<Map<String, dynamic>> historyMessages =
+            results.map((message) {
+          final senderId = message['sender_id'].toString();
+          final isSentByMe = senderId == currentUserId;
+          final messageText = message['message']['text'] ?? '';
+          final createdAt = message['created_at'];
+
+          return {
+            'id': createdAt.toString(),
+            'text': messageText,
+            'isSentByMe': isSentByMe,
+            'timestamp': DateTime.fromMillisecondsSinceEpoch(createdAt),
+            'status': 'read', // Assuming historical messages are read
+            'sender_id': senderId,
+          };
+        }).toList();
+
+        // Sort by timestamp (oldest first)
+        historyMessages
+            .sort((a, b) => a['timestamp'].compareTo(b['timestamp']));
+
+        setState(() {
+          _messages = historyMessages;
+          _isLoadingHistory = false;
+        });
+
+        // Scroll to bottom after loading
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _scrollToBottom();
+        });
+
+        print('Loaded ${_messages.length} historical messages');
+      }
+    } catch (error) {
+      print('Error fetching chat history: $error');
+      setState(() {
+        _isLoadingHistory = false;
+      });
+
+      // Show error to user
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to load chat history'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // Helper method to extract user ID from token
+  String? _getUserIdFromToken(String accessToken) {
+    try {
+      final List<String> parts = accessToken.split('.');
+      if (parts.length != 3) return null;
+
+      final String payloadBase64 = parts[1];
+      String paddedPayload = payloadBase64;
+      while (paddedPayload.length % 4 != 0) {
+        paddedPayload += '=';
+      }
+
+      final String decodedJson = utf8.decode(base64Url.decode(paddedPayload));
+      final Map<String, dynamic> tokenData = json.decode(decodedJson);
+
+      return tokenData['sub']?.toString();
+    } catch (e) {
+      print('Error decoding token: $e');
+      return null;
+    }
+  }
+
+  void _logConnectionStatus() {
+    print('=== WebSocket Connection Status ===');
+    print('isWebSocketConnected: ${widget.authApi.isWebSocketConnected}');
+    print(
+        'webSocketChannel: ${widget.authApi.currentWebSocketChannel != null}');
+    print('==================================');
+  }
+
+  void _setupWebSocketListeners() {
+    // Listen for messages specific to this conversation using the passed authApi
+    widget.authApi.addMessageHandler(_handleIncomingMessage);
+  }
+
+  @override
+  void dispose() {
+    // Remove the handler using the passed authApi
+    widget.authApi.removeMessageHandler(_handleIncomingMessage);
+
+    _isDisposed = true;
+
+    // Clean up timers
+    _typingDebounceTimer?.cancel();
+    widget.authApi.stopTyping();
+
+    // Dispose controllers
+    _messageController.dispose();
+    _scrollController.dispose();
+
+    super.dispose();
   }
 
   // Safe setState method that checks if widget is still mounted
@@ -60,45 +194,7 @@ class _MessagingPageState extends State<MessagingPage> {
     }
   }
 
-  Future<void> _connectToWebSocket() async {
-    _safeSetState(() {
-      _isConnecting = true;
-    });
-
-    try {
-      _channel = await _authApi.connectToWebSocket(widget.accessToken);
-      
-      _safeSetState(() {
-        _isConnected = true;
-        _isConnecting = false;
-      });
-
-      // Listen for incoming messages
-      _channel!.stream.listen(
-        (message) {
-          _handleIncomingMessage(message);
-        },
-        onError: (error) {
-          print('WebSocket error: $error');
-          _safeSetState(() {
-            _isConnected = false;
-          });
-        },
-        onDone: () {
-          print('WebSocket connection closed');
-          _safeSetState(() {
-            _isConnected = false;
-          });
-        },
-      );
-    } catch (e) {
-      _safeSetState(() {
-        _isConnecting = false;
-        _isConnected = false;
-      });
-      print('WebSocket connection failed: $e');
-    }
-  }
+  // Update all methods to use widget.authApi instead of _authApi
 
   void _handleIncomingMessage(dynamic message) {
     try {
@@ -108,13 +204,23 @@ class _MessagingPageState extends State<MessagingPage> {
       final messageData = json.decode(message);
 
       // Handle different types of incoming messages
+      // Add check to ensure this message is for the current conversation
       if (messageData['event'] != null) {
-        if (messageData['event'] is String && messageData['event'] == 'typing') {
-          // Handle typing indicator
-          _handleTypingEvent(messageData);
-        } else if (messageData['event'] is Map && messageData['event']['message'] != null) {
-          // Handle actual message
-          _handleNewMessage(messageData);
+        // Check if this message is intended for the current friend
+        final senderId = messageData['sender_id']?.toString();
+        final receiverId = messageData['receiver_id']?.toString();
+
+        // Only process if this message is from our current friend or to our current friend
+        if (senderId == widget.friendId || receiverId == widget.friendId) {
+          if (messageData['event'] is String &&
+              messageData['event'] == 'typing') {
+            // Handle typing indicator
+            _handleTypingEvent(messageData);
+          } else if (messageData['event'] is Map &&
+              messageData['event']['message'] != null) {
+            // Handle actual message
+            _handleNewMessage(messageData);
+          }
         }
       }
     } catch (e) {
@@ -124,24 +230,35 @@ class _MessagingPageState extends State<MessagingPage> {
 
   void _handleTypingEvent(Map<String, dynamic> messageData) {
     // Show typing indicator for the friend
-    // You can implement a typing indicator UI here
     print('${widget.friendUsername} is typing...');
   }
 
   void _handleNewMessage(Map<String, dynamic> messageData) {
-    final newMessage = {
-      'id': DateTime.now().millisecondsSinceEpoch.toString(),
-      'text': messageData['event']['message'],
-      'isSentByMe': false,
-      'timestamp': DateTime.now(),
-      'status': 'delivered',
-    };
+    try {
+      final currentUserId = _getUserIdFromToken(widget.accessToken);
+      final senderId = messageData['sender_id']?.toString();
+      final isSentByMe = senderId == currentUserId;
 
-    _safeSetState(() {
-      _messages.add(newMessage);
-    });
+      // Only process if this message is relevant to current conversation
+      if (senderId == widget.friendId || senderId == currentUserId) {
+        final newMessage = {
+          'id': DateTime.now().millisecondsSinceEpoch.toString(),
+          'text': messageData['event']['message'] ?? '',
+          'isSentByMe': isSentByMe,
+          'timestamp': DateTime.now(),
+          'status': 'delivered',
+          'sender_id': senderId,
+        };
 
-    _scrollToBottom();
+        _safeSetState(() {
+          _messages.add(newMessage);
+        });
+
+        _scrollToBottom();
+      }
+    } catch (e) {
+      print('Error handling new message: $e');
+    }
   }
 
   void _scrollToBottom() {
@@ -182,23 +299,34 @@ class _MessagingPageState extends State<MessagingPage> {
 
   void _sendTypingEvent() {
     try {
-      _authApi.startTyping(widget.accessToken, widget.friendId);
+      // Check if WebSocket is actually connected before sending
+      if (!widget.authApi.isWebSocketConnected) {
+        print('WebSocket not connected, attempting to reconnect...');
+        _reconnect();
+        return;
+      }
+
+      widget.authApi.startTyping(widget.accessToken, widget.friendId);
       print('Typing indicator sent to ${widget.friendUsername}');
     } catch (e) {
       print('Error sending typing event: $e');
+      // Attempt to reconnect on error
+      _reconnect();
     }
   }
 
   void _stopTypingEvent() {
     _isUserTyping = false;
     _typingDebounceTimer?.cancel();
-    _authApi.stopTyping();
+    widget.authApi.stopTyping();
     print('Typing indicator stopped for ${widget.friendUsername}');
   }
 
   void _sendMessage() {
     final text = _messageController.text.trim();
-    if (text.isEmpty || !_isConnected) return;
+
+    // Use the global WebSocket connection status from authApi
+    if (text.isEmpty || !widget.authApi.isWebSocketConnected) return;
 
     // Stop typing when sending message
     _stopTypingEvent();
@@ -220,8 +348,8 @@ class _MessagingPageState extends State<MessagingPage> {
     _scrollToBottom();
 
     try {
-      // Send via WebSocket
-      _authApi.sendMessage(widget.accessToken, text, widget.friendId);
+      // Send via WebSocket using the passed authApi
+      widget.authApi.sendMessage(widget.accessToken, text, widget.friendId);
 
       // Update status to sent
       _safeSetState(() {
@@ -236,28 +364,6 @@ class _MessagingPageState extends State<MessagingPage> {
     }
   }
 
-  @override
-  void dispose() {
-    _isDisposed = true;
-    
-    // Clean up timers
-    _typingDebounceTimer?.cancel();
-    _authApi.stopTyping();
-    
-    // Close WebSocket connection
-    try {
-      _authApi.disconnectWebSocket();
-    } catch (e) {
-      print('Error closing WebSocket: $e');
-    }
-    
-    // Dispose controllers
-    _messageController.dispose();
-    _scrollController.dispose();
-    
-    super.dispose();
-  }
-
   void _showError(String message) {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -269,29 +375,425 @@ class _MessagingPageState extends State<MessagingPage> {
     }
   }
 
-  void _reconnect() {
+  void _reconnect() async {
     if (mounted) {
-      _connectToWebSocket();
+      try {
+        print('Attempting to reconnect WebSocket...');
+        await widget.authApi.connectToWebSocket(widget.accessToken);
+
+        // Check connection status after reconnection attempt
+        if (widget.authApi.isWebSocketConnected) {
+          print('WebSocket reconnected successfully');
+          if (mounted) {
+            setState(() {});
+          }
+        } else {
+          print('WebSocket reconnection failed');
+        }
+      } catch (e) {
+        print('Reconnection failed: $e');
+      }
     }
   }
 
-  String _formatTime(DateTime timestamp) {
-    return '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}';
-  }
+  // Update connection status indicator to use global WebSocket status
+  Widget _buildConnectionStatusIndicator() {
+    // Use the global WebSocket connection status
+    final isConnected = widget.authApi.isWebSocketConnected;
 
-  String _formatDate(DateTime timestamp) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final yesterday = today.subtract(const Duration(days: 1));
-    final messageDate = DateTime(timestamp.year, timestamp.month, timestamp.day);
-
-    if (messageDate == today) {
-      return 'Today';
-    } else if (messageDate == yesterday) {
-      return 'Yesterday';
+    if (!isConnected) {
+      return GestureDetector(
+        onTap: _reconnect,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: Colors.red,
+                shape: BoxShape.circle,
+              ),
+            ),
+            SizedBox(width: 4),
+            Text(
+              'Offline',
+              style: TextStyle(color: Colors.red, fontSize: 10),
+            ),
+          ],
+        ),
+      );
     } else {
-      return '${timestamp.month}/${timestamp.day}/${timestamp.year}';
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: Colors.green,
+              shape: BoxShape.circle,
+            ),
+          ),
+          SizedBox(width: 4),
+          Text(
+            'Online',
+            style: TextStyle(color: Colors.green, fontSize: 10),
+          ),
+        ],
+      );
     }
+  }
+
+  Widget _buildLoadingHistory() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CircularProgressIndicator(
+            color: Colors.blue,
+          ),
+          SizedBox(height: 16),
+          Text(
+            'Loading chat history...',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Update the build method to use global connection status
+  @override
+  Widget build(BuildContext context) {
+    final isConnected = widget.authApi.isWebSocketConnected;
+
+    return Scaffold(
+      backgroundColor: mainBGColor,
+      appBar: AppBar(
+        backgroundColor: mainBGColor,
+        elevation: 1,
+        shadowColor: Colors.black.withOpacity(0.3),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Row(
+          children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: Colors.grey,
+              backgroundImage: widget.friendAvatarUrl != null
+                  ? NetworkImage(widget.friendAvatarUrl!)
+                  : null,
+              child: widget.friendAvatarUrl == null
+                  ? const Icon(Icons.person, size: 18, color: Colors.white)
+                  : null,
+            ),
+            const SizedBox(width: 12),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.friendUsername,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  widget.friendStatus,
+                  style: TextStyle(
+                    color: widget.friendStatus.toLowerCase() == 'online'
+                        ? Colors.green[400]
+                        : Colors.grey[400],
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.videocam, color: Colors.white),
+            onPressed: isConnected
+                ? () {
+                    print('Start video call with ${widget.friendUsername}');
+                  }
+                : null,
+          ),
+          IconButton(
+            icon: const Icon(Icons.call, color: Colors.white),
+            onPressed: isConnected
+                ? () {
+                    print('Start voice call with ${widget.friendUsername}');
+                  }
+                : null,
+          ),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert, color: Colors.white),
+            onSelected: (value) {
+              if (value == 'reconnect') {
+                _reconnect();
+              } else if (value == 'connection_info') {
+                _showConnectionInfo();
+              }
+            },
+            itemBuilder: (BuildContext context) => [
+              PopupMenuItem(
+                value: 'connection_info',
+                child: Row(
+                  children: [
+                    Icon(
+                      isConnected ? Icons.wifi : Icons.wifi_off,
+                      color: isConnected ? Colors.green : Colors.red,
+                    ),
+                    SizedBox(width: 8),
+                    Text(isConnected ? 'Connected' : 'Disconnected'),
+                  ],
+                ),
+              ),
+              if (!isConnected)
+                PopupMenuItem(
+                  value: 'reconnect',
+                  child: Row(
+                    children: [
+                      Icon(Icons.refresh, color: Colors.blue),
+                      SizedBox(width: 8),
+                      Text('Reconnect'),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          if (_isLoadingHistory)
+            LinearProgressIndicator(
+              backgroundColor: Colors.grey[800],
+              color: Colors.blue,
+              minHeight: 2,
+            ),
+          Expanded(
+            child: _isLoadingHistory
+                ? _buildLoadingHistory()
+                : ListView(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.symmetric(vertical: 8.0),
+                    children: _buildMessageList(),
+                  ),
+          ),
+          Container(
+            padding: const EdgeInsets.all(16.0),
+            decoration: BoxDecoration(
+              color: Colors.grey[900],
+              border: Border(
+                top: BorderSide(color: Colors.grey[800]!, width: 1),
+              ),
+            ),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    IconButton(
+                      icon:
+                          const Icon(Icons.add, color: Colors.white, size: 24),
+                      onPressed: isConnected
+                          ? () {
+                              print('Add attachment');
+                            }
+                          : null,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.grey[800],
+                          borderRadius: BorderRadius.circular(24.0),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _messageController,
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 16),
+                                decoration: const InputDecoration(
+                                  hintText: 'Type a message...',
+                                  hintStyle: TextStyle(color: Colors.grey),
+                                  border: InputBorder.none,
+                                  contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 16.0,
+                                    vertical: 14.0,
+                                  ),
+                                ),
+                                onChanged: _onMessageFieldChanged,
+                                onSubmitted: (_) => _sendMessage(),
+                                maxLines: 5,
+                                minLines: 1,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color:
+                            isConnected ? Colors.blue[800] : Colors.grey[600],
+                        shape: BoxShape.circle,
+                      ),
+                      child: IconButton(
+                        icon: const Icon(Icons.send,
+                            color: Colors.white, size: 24),
+                        onPressed: isConnected ? _sendMessage : null,
+                        padding: EdgeInsets.zero,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ... keep the rest of your existing methods (_buildMessageBubble, _buildDateSeparator, etc.)
+  // but make sure to update any references from _authApi to widget.authApi
+
+  Widget _buildStatusRow(String label, bool isConnected) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Row(
+        children: [
+          Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(
+              color: isConnected ? Colors.green : Colors.red,
+              shape: BoxShape.circle,
+            ),
+          ),
+          SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(color: Colors.white),
+            ),
+          ),
+          Text(
+            isConnected ? 'Connected' : 'Disconnected',
+            style: TextStyle(
+              color: isConnected ? Colors.green : Colors.red,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showConnectionInfo() {
+    final isConnected = widget.authApi.isWebSocketConnected;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        title: Text(
+          'Connection Status',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildStatusRow('WebSocket Connection', isConnected),
+            _buildFriendStatusRow('Friend Status', widget.friendStatus),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Close', style: TextStyle(color: Colors.blue)),
+          ),
+          if (!isConnected)
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _reconnect();
+              },
+              child: Text('Reconnect', style: TextStyle(color: Colors.green)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFriendStatusRow(String label, String status) {
+    final isOnline = status.toLowerCase() == 'online';
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Row(
+        children: [
+          Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(
+              color: isOnline ? Colors.green : Colors.grey,
+              shape: BoxShape.circle,
+            ),
+          ),
+          SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(color: Colors.white),
+            ),
+          ),
+          Text(
+            status,
+            style: TextStyle(
+              color: isOnline ? Colors.green : Colors.grey,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _buildMessageList() {
+    List<Widget> messageWidgets = [];
+    DateTime? currentDate;
+
+    for (var message in _messages) {
+      final timestamp = message['timestamp'] is DateTime
+          ? message['timestamp'] as DateTime
+          : DateTime.now();
+      final messageDate =
+          DateTime(timestamp.year, timestamp.month, timestamp.day);
+
+      // Add date separator if date changes
+      if (currentDate == null || currentDate != messageDate) {
+        currentDate = messageDate;
+        messageWidgets.add(_buildDateSeparator(currentDate));
+      }
+
+      messageWidgets.add(_buildMessageBubble(message));
+    }
+
+    return messageWidgets;
   }
 
   Widget _buildMessageBubble(Map<String, dynamic> message) {
@@ -421,385 +923,23 @@ class _MessagingPageState extends State<MessagingPage> {
     );
   }
 
-  List<Widget> _buildMessageList() {
-    List<Widget> messageWidgets = [];
-    DateTime? currentDate;
-
-    for (var message in _messages) {
-      final timestamp = message['timestamp'] is DateTime
-          ? message['timestamp'] as DateTime
-          : DateTime.now();
-      final messageDate = DateTime(timestamp.year, timestamp.month, timestamp.day);
-
-      // Add date separator if date changes
-      if (currentDate == null || currentDate != messageDate) {
-        currentDate = messageDate;
-        messageWidgets.add(_buildDateSeparator(currentDate));
-      }
-
-      messageWidgets.add(_buildMessageBubble(message));
-    }
-
-    return messageWidgets;
+  String _formatTime(DateTime timestamp) {
+    return '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}';
   }
 
-  // Subtle connection status indicator in the input area
-  Widget _buildConnectionStatusIndicator() {
-    if (_isConnecting) {
-      return Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SizedBox(
-            width: 8,
-            height: 8,
-            child: CircularProgressIndicator(
-              strokeWidth: 1,
-              color: Colors.orange,
-            ),
-          ),
-          SizedBox(width: 4),
-          Text(
-            'Connecting...',
-            style: TextStyle(color: Colors.orange, fontSize: 10),
-          ),
-        ],
-      );
-    } else if (!_isConnected) {
-      return GestureDetector(
-        onTap: _reconnect,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 8,
-              height: 8,
-              decoration: BoxDecoration(
-                color: Colors.red,
-                shape: BoxShape.circle,
-              ),
-            ),
-            SizedBox(width: 4),
-            Text(
-              'Offline',
-              style: TextStyle(color: Colors.red, fontSize: 10),
-            ),
-          ],
-        ),
-      );
+  String _formatDate(DateTime timestamp) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final yesterday = today.subtract(const Duration(days: 1));
+    final messageDate =
+        DateTime(timestamp.year, timestamp.month, timestamp.day);
+
+    if (messageDate == today) {
+      return 'Today';
+    } else if (messageDate == yesterday) {
+      return 'Yesterday';
     } else {
-      return Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(
-              color: Colors.green,
-              shape: BoxShape.circle,
-            ),
-          ),
-          SizedBox(width: 4),
-          Text(
-            'Online',
-            style: TextStyle(color: Colors.green, fontSize: 10),
-          ),
-        ],
-      );
+      return '${timestamp.month}/${timestamp.day}/${timestamp.year}';
     }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: mainBGColor,
-      appBar: AppBar(
-        backgroundColor: mainBGColor,
-        elevation: 1,
-        shadowColor: Colors.black.withOpacity(0.3),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: Row(
-          children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: Colors.grey,
-              backgroundImage: widget.friendAvatarUrl != null
-                  ? NetworkImage(widget.friendAvatarUrl!)
-                  : null,
-              child: widget.friendAvatarUrl == null
-                  ? const Icon(Icons.person, size: 18, color: Colors.white)
-                  : null,
-            ),
-            const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.friendUsername,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                Text(
-                  widget.friendStatus,
-                  style: TextStyle(
-                    color: widget.friendStatus.toLowerCase() == 'online'
-                        ? Colors.green[400]
-                        : Colors.grey[400],
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.videocam, color: Colors.white),
-            onPressed: _isConnected
-                ? () {
-                    print('Start video call with ${widget.friendUsername}');
-                  }
-                : null,
-          ),
-          IconButton(
-            icon: const Icon(Icons.call, color: Colors.white),
-            onPressed: _isConnected
-                ? () {
-                    print('Start voice call with ${widget.friendUsername}');
-                  }
-                : null,
-          ),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert, color: Colors.white),
-            onSelected: (value) {
-              if (value == 'reconnect') {
-                _reconnect();
-              } else if (value == 'connection_info') {
-                _showConnectionInfo();
-              }
-            },
-            itemBuilder: (BuildContext context) => [
-              PopupMenuItem(
-                value: 'connection_info',
-                child: Row(
-                  children: [
-                    Icon(
-                      _isConnected ? Icons.wifi : Icons.wifi_off,
-                      color: _isConnected ? Colors.green : Colors.red,
-                    ),
-                    SizedBox(width: 8),
-                    Text(_isConnected ? 'Connected' : 'Disconnected'),
-                  ],
-                ),
-              ),
-              PopupMenuItem(
-                value: 'reconnect',
-                child: Row(
-                  children: [
-                    Icon(Icons.refresh, color: Colors.blue),
-                    SizedBox(width: 8),
-                    Text('Reconnect'),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: ListView(
-              controller: _scrollController,
-              padding: const EdgeInsets.symmetric(vertical: 8.0),
-              children: _buildMessageList(),
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.all(16.0),
-            decoration: BoxDecoration(
-              color: Colors.grey[900],
-              border: Border(
-                top: BorderSide(color: Colors.grey[800]!, width: 1),
-              ),
-            ),
-            child: Column(
-              children: [
-                // Row(
-                //   mainAxisAlignment: MainAxisAlignment.end,
-                //   children: [
-                //     _buildConnectionStatusIndicator(),
-                //   ],
-                // ),
-                // SizedBox(height: 8),
-                Row(
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.add, color: Colors.white, size: 24),
-                      onPressed: _isConnected
-                          ? () {
-                              print('Add attachment');
-                            }
-                          : null,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.grey[800],
-                          borderRadius: BorderRadius.circular(24.0),
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: _messageController,
-                                style: const TextStyle(
-                                    color: Colors.white, fontSize: 16),
-                                decoration: const InputDecoration(
-                                  hintText: 'Type a message...',
-                                  hintStyle: TextStyle(color: Colors.grey),
-                                  border: InputBorder.none,
-                                  contentPadding: EdgeInsets.symmetric(
-                                    horizontal: 16.0,
-                                    vertical: 14.0,
-                                  ),
-                                ),
-                                onChanged: _onMessageFieldChanged,
-                                onSubmitted: (_) => _sendMessage(),
-                                enabled: _isConnected,
-                                maxLines: 5,
-                                minLines: 1,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: _isConnected ? Colors.blue[800] : Colors.grey[600],
-                        shape: BoxShape.circle,
-                      ),
-                      child: IconButton(
-                        icon: const Icon(Icons.send, color: Colors.white, size: 24),
-                        onPressed: _isConnected ? _sendMessage : null,
-                        padding: EdgeInsets.zero,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatusRow(String label, bool isConnected) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: Row(
-        children: [
-          Container(
-            width: 12,
-            height: 12,
-            decoration: BoxDecoration(
-              color: isConnected ? Colors.green : Colors.red,
-              shape: BoxShape.circle,
-            ),
-          ),
-          SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(color: Colors.white),
-            ),
-          ),
-          Text(
-            isConnected ? 'Connected' : 'Disconnected',
-            style: TextStyle(
-              color: isConnected ? Colors.green : Colors.red,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showConnectionInfo() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.grey[900],
-        title: Text(
-          'Connection Status',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildStatusRow('WebSocket Connection', _isConnected),
-            _buildFriendStatusRow('Friend Status', widget.friendStatus),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Close', style: TextStyle(color: Colors.blue)),
-          ),
-          if (!_isConnected)
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-                _reconnect();
-              },
-              child: Text('Reconnect', style: TextStyle(color: Colors.green)),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFriendStatusRow(String label, String status) {
-    final isOnline = status.toLowerCase() == 'online';
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: Row(
-        children: [
-          Container(
-            width: 12,
-            height: 12,
-            decoration: BoxDecoration(
-              color: isOnline ? Colors.green : Colors.grey,
-              shape: BoxShape.circle,
-            ),
-          ),
-          SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(color: Colors.white),
-            ),
-          ),
-          Text(
-            status,
-            style: TextStyle(
-              color: isOnline ? Colors.green : Colors.grey,
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }

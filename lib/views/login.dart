@@ -145,10 +145,7 @@ class _LoginFormState extends State<LoginForm> {
         MaterialPageRoute(
           builder: (context) => ChatList(
             accessToken: _authApi.accessToken ?? '',
-            loginPayload: response, // Pass the response data
-            // If you want to pass location to ChatList, add these parameters:
-            // userLatitude: userLatitude,
-            // userLongitude: userLongitude,
+            authApi: _authApi,
           ),
         ),
       );
@@ -326,9 +323,7 @@ class _LoginFormState extends State<LoginForm> {
                           _isLoading ? null : _submitForm();
                         }
                       },
-                      child: _isLoading
-                          ? const CircularProgressIndicator()
-                          : const Text('Login'),
+                      child: const Text('Login'),
                     ),
                   ),
                   const SizedBox(height: 20), // Added extra space at the bottom
