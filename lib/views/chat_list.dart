@@ -640,45 +640,16 @@ class _ChatListState extends State<ChatList> {
                       style: const TextStyle(color: Colors.white),
                       alignment: AlignmentDirectional.bottomCenter,
                       items: [
-                        DropdownMenuItem(
-                          value: 'online',
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 12,
-                                height: 12,
-                                decoration: const BoxDecoration(
-                                  color: Colors.green,
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              const Text('Online'),
-                            ],
-                          ),
-                        ),
-                        DropdownMenuItem(
-                          value: 'offline',
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 12,
-                                height: 12,
-                                decoration: const BoxDecoration(
-                                  color: Colors.grey,
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              const Text('Offline'),
-                            ],
-                          ),
-                        ),
+                        _buildStatusMenuItem('online', Colors.green, 'Online'),
+                        _buildStatusMenuItem('idle', Colors.orange, 'Idle'),
+                        _buildStatusMenuItem('dnd', Colors.red, 'Do Not Disturb'),
+                        _buildStatusMenuItem('invisible', Colors.grey, 'Invisible'),
+                        _buildStatusMenuItem('offline', Colors.grey, 'Offline'),
                       ],
-                      onChanged: (String? newValue) {
-                        setState(() {
-                          _currentStatus = newValue!;
-                        });
+                      onChanged: (String? newValue) async {
+                        if (newValue != null && newValue != _currentStatus) {
+                          await _updateUserStatus(newValue);
+                        }
                       },
                       icon: const Icon(Icons.arrow_drop_down,
                           color: Colors.white),
@@ -702,7 +673,11 @@ class _ChatListState extends State<ChatList> {
                     accessToken: widget.accessToken,
                   ),
                 ),
-              );
+              ).then((_) {
+                // Refresh user data when returning from profile page
+                print('Refreshing user data after returning from profile');
+                _fetchUserDataWithToken(widget.accessToken);
+              });
             },
           ),
           ListTile(
@@ -873,7 +848,16 @@ class _ChatListState extends State<ChatList> {
                 accessToken: widget.accessToken,
               ),
             ),
-          );
+          ).then((_) {
+            // Refresh friend details when returning from their profile
+            print('Refreshing friend details after viewing profile');
+            if (_userData != null && _userData!['user_id'] != null) {
+              _fetchCurrentUserFriends(
+                widget.accessToken,
+                _userData!['user_id'].toString(),
+              );
+            }
+          });
         },
         child: Stack(
           children: [
@@ -1218,6 +1202,100 @@ class _ChatListState extends State<ChatList> {
         ],
       ),
     );
+  }
+
+  // Build status dropdown menu item
+  DropdownMenuItem<String> _buildStatusMenuItem(String value, Color color, String label) {
+    return DropdownMenuItem(
+      value: value,
+      child: Row(
+        children: [
+          Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Text(label),
+        ],
+      ),
+    );
+  }
+
+  // Update user status via API
+  Future<void> _updateUserStatus(String newStatus) async {
+    try {
+      // Get current user ID
+      final userId = _userData?['user_id']?.toString();
+      if (userId == null) {
+        throw Exception('User ID not found');
+      }
+
+      // Show loading indicator
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Updating status...'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+
+      // Call API to update status
+      final response = await widget.apiService.updateUser(
+        userId,
+        status: newStatus,
+      );
+
+      if (response['success'] == true) {
+        // Update local state
+        setState(() {
+          _currentStatus = newStatus;
+          if (_userData != null) {
+            _userData!['status'] = newStatus;
+          }
+        });
+
+        // Show success message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Status updated to ${_getStatusLabel(newStatus)}'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      } else {
+        throw Exception(response['message'] ?? 'Failed to update status');
+      }
+    } catch (error) {
+      print('Error updating status: $error');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to update status: $error'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
+  // Get human-readable status label
+  String _getStatusLabel(String status) {
+    switch (status) {
+      case 'online':
+        return 'Online';
+      case 'idle':
+        return 'Idle';
+      case 'dnd':
+        return 'Do Not Disturb';
+      case 'invisible':
+        return 'Invisible';
+      case 'offline':
+        return 'Offline';
+      default:
+        return status;
+    }
   }
 
   @override

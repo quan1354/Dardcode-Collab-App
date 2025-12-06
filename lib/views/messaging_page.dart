@@ -86,7 +86,9 @@ class _MessagingPageState extends State<MessagingPage> {
             results.map((message) {
           final senderId = message['sender_id'].toString();
           final isSentByMe = senderId == currentUserId;
-          final messageText = message['message']['text'] ?? '';
+          final messageData = message['message'] as Map<String, dynamic>;
+          final messageText = messageData['text'] ?? '';
+          final isEdited = messageData['edited'] ?? false;
           final createdAt = message['created_at'];
 
           return {
@@ -96,6 +98,8 @@ class _MessagingPageState extends State<MessagingPage> {
             'timestamp': DateTime.fromMillisecondsSinceEpoch(createdAt),
             'status': 'read', // Assuming historical messages are read
             'sender_id': senderId,
+            'created_at': createdAt, // Store created_at for edit/delete operations
+            'edited': isEdited, // Store edited flag from API
           };
         }).toList();
 
@@ -169,8 +173,31 @@ class _MessagingPageState extends State<MessagingPage> {
     try {
       print('Received message: $message');
 
-      // Parse the incoming message
-      final messageData = json.decode(message);
+      // Parse the incoming message - handle both String and Map
+      final Map<String, dynamic> messageData;
+      if (message is String) {
+        messageData = json.decode(message);
+      } else if (message is Map<String, dynamic>) {
+        messageData = message;
+      } else {
+        print('Unknown message type: ${message.runtimeType}');
+        return;
+      }
+
+      // Check if this is a payload response (edit/delete actions)
+      if (messageData['payload'] != null && messageData['payload']['action'] != null) {
+        final payload = messageData['payload'] as Map<String, dynamic>;
+        final action = payload['action'] as Map<String, dynamic>;
+        final actionType = action['action'] as String?;
+
+        if (actionType == 'edit_message') {
+          _handleEditMessageEvent(payload);
+          return;
+        } else if (actionType == 'delete_message') {
+          _handleDeleteMessageEvent(payload);
+          return;
+        }
+      }
 
       // Handle different types of incoming messages
       // Add check to ensure this message is for the current conversation
@@ -194,6 +221,65 @@ class _MessagingPageState extends State<MessagingPage> {
       }
     } catch (e) {
       print('Error parsing incoming message: $e');
+    }
+  }
+
+  /// Handle edit message event from WebSocket
+  void _handleEditMessageEvent(Map<String, dynamic> payload) {
+    try {
+      final senderId = payload['sender_id']?.toString();
+      final msgCreatedAt = payload['msg_created_at'] as int?;
+      final messageObj = payload['message'] as Map<String, dynamic>?;
+
+      if (msgCreatedAt == null || messageObj == null) {
+        print('Invalid edit message payload');
+        return;
+      }
+
+      final newText = messageObj['text'] as String?;
+      final isEdited = messageObj['edited'] as bool? ?? true;
+
+      if (newText == null) {
+        print('No text in edit message payload');
+        return;
+      }
+
+      // Find and update the message in the list
+      _safeSetState(() {
+        final messageIndex = _messages.indexWhere(
+          (msg) => msg['created_at'] == msgCreatedAt,
+        );
+
+        if (messageIndex != -1) {
+          _messages[messageIndex]['text'] = newText;
+          _messages[messageIndex]['edited'] = isEdited;
+          print('Message updated locally: $newText (edited: $isEdited)');
+        } else {
+          print('Message not found for edit: created_at=$msgCreatedAt');
+        }
+      });
+    } catch (e) {
+      print('Error handling edit message event: $e');
+    }
+  }
+
+  /// Handle delete message event from WebSocket
+  void _handleDeleteMessageEvent(Map<String, dynamic> payload) {
+    try {
+      final msgCreatedAt = payload['msg_created_at'] as int?;
+
+      if (msgCreatedAt == null) {
+        print('Invalid delete message payload');
+        return;
+      }
+
+      // Find and remove the message from the list
+      _safeSetState(() {
+        _messages.removeWhere((msg) => msg['created_at'] == msgCreatedAt);
+        print('Message deleted locally: created_at=$msgCreatedAt');
+      });
+    } catch (e) {
+      print('Error handling delete message event: $e');
     }
   }
 
@@ -301,12 +387,14 @@ class _MessagingPageState extends State<MessagingPage> {
     _stopTypingEvent();
 
     // Create local message immediately for better UX
+    final createdAt = DateTime.now().millisecondsSinceEpoch;
     final newMessage = {
-      'id': DateTime.now().millisecondsSinceEpoch.toString(),
+      'id': createdAt.toString(),
       'text': text,
       'isSentByMe': true,
       'timestamp': DateTime.now(),
       'status': 'sending',
+      'created_at': createdAt, // Store created_at for edit/delete operations
     };
 
     _safeSetState(() {
@@ -494,6 +582,8 @@ class _MessagingPageState extends State<MessagingPage> {
                 _reconnect();
               } else if (value == 'connection_info') {
                 _showConnectionInfo();
+              } else if (value == 'remove_friend') {
+                _showRemoveFriendConfirmation();
               }
             },
             itemBuilder: (BuildContext context) => [
@@ -521,6 +611,16 @@ class _MessagingPageState extends State<MessagingPage> {
                     ],
                   ),
                 ),
+              PopupMenuItem(
+                value: 'remove_friend',
+                child: Row(
+                  children: [
+                    Icon(Icons.person_remove, color: Colors.red),
+                    SizedBox(width: 8),
+                    Text('Remove Friend', style: TextStyle(color: Colors.red)),
+                  ],
+                ),
+              ),
             ],
           ),
         ],
@@ -800,6 +900,17 @@ class _MessagingPageState extends State<MessagingPage> {
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        if (message['edited'] == true) ...[
+                          Text(
+                            'edited',
+                            style: TextStyle(
+                              color: Colors.grey[500],
+                              fontSize: 11,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                        ],
                         Text(
                           _formatTime(timestamp),
                           style: TextStyle(
@@ -910,16 +1021,25 @@ class _MessagingPageState extends State<MessagingPage> {
                 print('Copy message: ${message['text']}');
               },
             ),
-            if (isSentByMe)
+            if (isSentByMe) ...[
+              _buildMenuOption(
+                icon: Icons.edit,
+                label: 'Edit',
+                onTap: () {
+                  Navigator.pop(context);
+                  _showEditMessageDialog(message);
+                },
+              ),
               _buildMenuOption(
                 icon: Icons.delete,
                 label: 'Delete',
                 color: Colors.red,
                 onTap: () {
                   Navigator.pop(context);
-                  _deleteMessage(message);
+                  _showDeleteMessageConfirmation(message);
                 },
               ),
+            ],
             _buildMenuOption(
               icon: Icons.star_border,
               label: 'Star',
@@ -959,16 +1079,218 @@ class _MessagingPageState extends State<MessagingPage> {
     );
   }
 
-  void _deleteMessage(Map<String, dynamic> message) {
-    setState(() {
-      _messages.remove(message);
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Message deleted'),
-        duration: Duration(seconds: 2),
+  /// Show edit message dialog
+  void _showEditMessageDialog(Map<String, dynamic> message) {
+    final TextEditingController editController = TextEditingController(
+      text: message['text'],
+    );
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        title: const Text(
+          'Edit Message',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: TextField(
+          controller: editController,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: 'Enter new message',
+            hintStyle: TextStyle(color: Colors.grey[400]),
+            enabledBorder: UnderlineInputBorder(
+              borderSide: BorderSide(color: Colors.grey[600]!),
+            ),
+            focusedBorder: const UnderlineInputBorder(
+              borderSide: BorderSide(color: Colors.blue),
+            ),
+          ),
+          maxLines: 3,
+          minLines: 1,
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              editController.dispose();
+              Navigator.pop(context);
+            },
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          TextButton(
+            onPressed: () {
+              final newText = editController.text.trim();
+              if (newText.isNotEmpty && newText != message['text']) {
+                Navigator.pop(context);
+                _editMessage(message, newText);
+              } else {
+                Navigator.pop(context);
+              }
+              editController.dispose();
+            },
+            child: const Text('Save', style: TextStyle(color: Colors.blue)),
+          ),
+        ],
       ),
     );
+  }
+
+  /// Edit message API call
+  Future<void> _editMessage(Map<String, dynamic> message, String newText) async {
+    try {
+      // Show loading indicator
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Editing message...'),
+            duration: Duration(seconds: 1),
+          ),
+        );
+      }
+
+      // Get current user ID from token
+      final currentUserId = _getUserIdFromToken(widget.accessToken);
+      if (currentUserId == null) {
+        throw Exception('Could not get current user ID from token');
+      }
+
+      // Get message created_at timestamp
+      final createdAt = message['created_at'] as int;
+
+      // Call API to edit message
+      final response = await widget.apiService.editUserMessage(
+        currentUserId,
+        widget.friendId,
+        createdAt,
+        newText,
+      );
+
+      if (response['success'] == true) {
+        // Update message locally
+        setState(() {
+          message['text'] = newText;
+          message['edited'] = true; // Mark as edited
+        });
+
+        // Show success message
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Message edited successfully'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      } else {
+        throw Exception(response['message'] ?? 'Failed to edit message');
+      }
+    } catch (error) {
+      print('Error editing message: $error');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to edit message: $error'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
+  /// Show delete message confirmation dialog
+  void _showDeleteMessageConfirmation(Map<String, dynamic> message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        title: const Text(
+          'Delete Message',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: const Text(
+          'Are you sure you want to delete this message? This action cannot be undone.',
+          style: TextStyle(color: Colors.white),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _deleteMessage(message);
+            },
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Delete message API call
+  Future<void> _deleteMessage(Map<String, dynamic> message) async {
+    try {
+      // Show loading indicator
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Deleting message...'),
+            duration: Duration(seconds: 1),
+          ),
+        );
+      }
+
+      // Get current user ID from token
+      final currentUserId = _getUserIdFromToken(widget.accessToken);
+      if (currentUserId == null) {
+        throw Exception('Could not get current user ID from token');
+      }
+
+      // Get message created_at timestamp
+      final createdAt = message['created_at'] as int;
+
+      // Call API to delete message
+      final response = await widget.apiService.deleteUserMessage(
+        currentUserId,
+        widget.friendId,
+        createdAt,
+      );
+
+      if (response['success'] == true) {
+        // Remove message locally
+        setState(() {
+          _messages.remove(message);
+        });
+
+        // Show success message
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Message deleted successfully'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      } else {
+        throw Exception(response['message'] ?? 'Failed to delete message');
+      }
+    } catch (error) {
+      print('Error deleting message: $error');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to delete message: $error'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
   }
 
   void _showMessageInfo(Map<String, dynamic> message) {
@@ -1003,6 +1325,95 @@ class _MessagingPageState extends State<MessagingPage> {
       ),
     );
   }
+  // Remove friend confirmation dialog
+  void _showRemoveFriendConfirmation() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        title: const Text(
+          'Remove Friend',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          'Are you sure you want to remove ${widget.friendUsername} from your friends list? This will delete all chat history.',
+          style: const TextStyle(color: Colors.white),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context); // Close dialog
+              _removeFriend();
+            },
+            child: const Text('Remove', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Remove friend API call
+  Future<void> _removeFriend() async {
+    try {
+      // Show loading indicator
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Removing friend...'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+
+      // Get current user ID from token
+      final currentUserId = _getUserIdFromToken(widget.accessToken);
+      if (currentUserId == null) {
+        throw Exception('Could not get current user ID from token');
+      }
+
+      // Call API to remove friend
+      final response = await widget.apiService.removeChatUser(
+        currentUserId,
+        widget.friendId,
+      );
+
+      if (response['success'] == true) {
+        // Show success message
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('${widget.friendUsername} has been removed from your friends list'),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+
+        // Navigate back to chat list with refresh
+        if (mounted) {
+          Navigator.pop(context, true); // Return true to indicate refresh needed
+        }
+      } else {
+        throw Exception(response['message'] ?? 'Failed to remove friend');
+      }
+    } catch (error) {
+      print('Error removing friend: $error');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to remove friend: $error'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
 
   Widget _buildInfoRow(String label, String value) {
     return Padding(

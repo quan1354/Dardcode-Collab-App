@@ -16,10 +16,16 @@ class ApiService {
   String? _accessToken;
   String? _refreshToken;
   String? _sessionToken;
+  
+  // User location storage
+  double? _userLatitude;
+  double? _userLongitude;
 
   String? get accessToken => _accessToken;
   String? get refreshToken => _refreshToken;
   String? get sessionToken => _sessionToken;
+  double? get userLatitude => _userLatitude;
+  double? get userLongitude => _userLongitude;
 
   // WebSocket management
   WebSocketChannel? _webSocketChannel;
@@ -52,8 +58,20 @@ class ApiService {
     _accessToken = null;
     _refreshToken = null;
     _sessionToken = null;
-    print('All tokens cleared');
+    _userLatitude = null;
+    _userLongitude = null;
+    print('All tokens and location data cleared');
   }
+
+  /// Store user location (called after login)
+  void setUserLocation(double latitude, double longitude) {
+    _userLatitude = latitude;
+    _userLongitude = longitude;
+    print('User location stored: Lat: $latitude, Long: $longitude');
+  }
+
+  /// Check if user location is available
+  bool get hasUserLocation => _userLatitude != null && _userLongitude != null;
 
   Future<Map<String, dynamic>> login(String email, String password) async {
     try {
@@ -444,9 +462,62 @@ class ApiService {
     }
   }
 
-  Future<List<User>> findNearbyUsers() async {
+  /// Find nearby users based on location
+  ///
+  /// Parameters:
+  /// - latitude: Optional latitude in degrees (defaults to stored user location)
+  /// - longitude: Optional longitude in degrees (defaults to stored user location)
+  /// - pageSize: Max number of users to return (default: 100)
+  /// - next: Next key for pagination
+  ///
+  /// Priority order:
+  /// 1. Explicitly provided latitude/longitude parameters
+  /// 2. Stored user location from login
+  /// 3. CloudFront distribution location (API fallback)
+  Future<List<User>> findNearbyUsers({
+    double? latitude,
+    double? longitude,
+    int pageSize = 100,
+    String? next,
+  }) async {
     return await retryWithTokenRefresh(() async {
-      final uri = Uri.parse('$_baseUrl/user/list');
+      // Build query parameters
+      final Map<String, String> queryParams = {
+        'page_size': pageSize.toString(),
+      };
+
+      // Determine which location to use
+      double? finalLat = latitude;
+      double? finalLong = longitude;
+
+      // If no explicit location provided, use stored user location
+      if (finalLat == null && finalLong == null && hasUserLocation) {
+        finalLat = _userLatitude;
+        finalLong = _userLongitude;
+        print('Using stored user location: Lat: $finalLat, Long: $finalLong');
+      }
+
+      // Add location parameters if available
+      if (finalLat != null && finalLong != null) {
+        queryParams['near'] = '$finalLat,$finalLong';
+      } else if (finalLat != null || finalLong != null) {
+        // If only one is provided, throw error
+        throw Exception('Both latitude and longitude must be provided together');
+      }
+      // If neither is provided, API will use CloudFront distribution location
+
+      // Add pagination if provided
+      if (next != null && next.isNotEmpty) {
+        queryParams['next'] = next;
+      }
+
+      final uri = Uri.parse('$_baseUrl/user/list').replace(
+        queryParameters: queryParams,
+      );
+      print('NearBy Users URL: $uri');
+
+      print('Finding nearby users with params: $queryParams');
+
       final response = await http.get(
         uri,
         headers: {
@@ -460,6 +531,7 @@ class ApiService {
         if (responseData['payload'] != null &&
             responseData['payload']['results'] != null) {
           final usersData = responseData['payload']['results'] as List;
+          print('Found ${usersData.length} nearby users');
           return usersData.map((userJson) => User.fromJson(userJson)).toList();
         } else {
           throw Exception('No user data found');
@@ -563,8 +635,232 @@ class ApiService {
     });
   }
 
-  Future<Map<String, dynamic>> getMessageHistory(
-       user_id, other_user_id) async {
+  Future<Map<String, dynamic>> removeChatUser(
+      String user_id, String other_user_id) async {
+    return await retryWithTokenRefresh(() async {
+      final removeChatUserUrl =
+          Uri.parse('$_baseUrl/chat/$user_id/$other_user_id');
+
+      final response = await http.delete(
+        removeChatUserUrl,
+        headers: {
+          'Authorization': this.accessToken!,
+          'Content-Type': 'application/json',
+        },
+      );
+
+      final responseData = jsonDecode(response.body) as Map<String, dynamic>;
+      print('Remove User successfully: $responseData');
+
+      if (response.statusCode != 200) {
+        throw Exception('Remove User failed: ${responseData['message']}');
+      }
+
+      return {
+        'success': true,
+        'message': 'Remove Users successfully',
+        'data': responseData
+      };
+    });
+  }
+
+  Future<Map<String, dynamic>> updateUser(
+    String user_id, {
+    String? status,
+    String? about_me,
+    double? latitude,
+    double? longitude,
+  }) async {
+    return await retryWithTokenRefresh(() async {
+      final updateUserUrl = Uri.parse('$_baseUrl/user/$user_id');
+
+      // Build request body with only provided parameters
+      final Map<String, dynamic> requestBody = {};
+
+      if (status != null) requestBody['status'] = status;
+      if (about_me != null) requestBody['about_me'] = about_me;
+      if (latitude != null) requestBody['latitude'] = latitude;
+      if (longitude != null) requestBody['longitude'] = longitude;
+
+      // Use default values if nothing is provided
+      if (requestBody.isEmpty) {
+        requestBody['status'] = 'online';
+        requestBody['about_me'] = '';
+      }
+
+      print('Updating user $user_id with data: $requestBody');
+
+      final response = await http.put(
+        updateUserUrl,
+        headers: {
+          'Authorization': this.accessToken!,
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode(requestBody),
+      );
+
+      final responseData = jsonDecode(response.body) as Map<String, dynamic>;
+      print('Update User Response: $responseData');
+
+      if (response.statusCode != 200) {
+        throw Exception('Update User failed: ${responseData['message']}');
+      }
+
+      return {
+        'success': true,
+        'message': 'User updated successfully',
+        'data': responseData
+      };
+    });
+  }
+
+  /// Edit a chat message
+  /// PUT /chat/{sender_id}/{other_user_id}/message/{msg_created_at}
+  Future<Map<String, dynamic>> editUserMessage(
+    String sender_id,
+    String other_user_id,
+    int msg_created_at,
+    String message_text,
+  ) async {
+    return await retryWithTokenRefresh(() async {
+      final editUserMessageUrl = Uri.parse(
+        '$_baseUrl/chat/$sender_id/$other_user_id/message/$msg_created_at',
+      );
+
+      final response = await http.put(
+        editUserMessageUrl,
+        headers: {
+          'Authorization': this.accessToken!,
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'message_text': message_text}),
+      );
+
+      final responseData = jsonDecode(response.body) as Map<String, dynamic>;
+      print('Edit Chat Message Response: $responseData');
+
+      if (response.statusCode != 200) {
+        throw Exception(
+          'Edit Chat Message failed: ${responseData['message'] ?? 'Unknown error'}',
+        );
+      }
+
+      return {
+        'success': true,
+        'message': 'Message edited successfully',
+        'data': responseData
+      };
+    });
+  }
+
+  /// Delete a chat message
+  /// DELETE /chat/{sender_id}/{other_user_id}/message/{msg_created_at}
+  Future<Map<String, dynamic>> deleteUserMessage(
+    String sender_id,
+    String other_user_id,
+    int msg_created_at,
+  ) async {
+    return await retryWithTokenRefresh(() async {
+      final deleteUserMessageUrl = Uri.parse(
+        '$_baseUrl/chat/$sender_id/$other_user_id/message/$msg_created_at',
+      );
+
+      final response = await http.delete(
+        deleteUserMessageUrl,
+        headers: {
+          'Authorization': this.accessToken!,
+          'Content-Type': 'application/json',
+        },
+      );
+
+      final responseData = jsonDecode(response.body) as Map<String, dynamic>;
+      print('Delete Chat Message Response: $responseData');
+
+      if (response.statusCode != 200) {
+        throw Exception(
+          'Delete Chat Message failed: ${responseData['message'] ?? 'Unknown error'}',
+        );
+      }
+
+      return {
+        'success': true,
+        'message': 'Message deleted successfully',
+        'data': responseData
+      };
+    });
+  }
+
+  //*flutter: Avatar Upload URL Response: {code: 2000, message: , payload: {method: PUT, uri: https://darkord-stage-user-public.s3.us-east-1.amazonaws.com/avatar/10000048.jpg?x-id=PutObject&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=ASIAZQ3DTCJ75O3QZSUL%2F20251129%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20251129T062431Z&X-Amz-Expires=300&X-Amz-SignedHeaders=content-length%3Bcontent-type%3Bhost%3Bx-amz-server-side-encryption&X-Amz-Signature=7e91d6a3abb8c2acc7795f5f76ac4be5fbba09f022eeefeff794dcd74fc01e00&X-Amz-Security-Token=IQoJb3JpZ2luX2VjEP%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FwEaCXVzLWVhc3QtMSJIMEYCIQDDCVOF51fXYW%2FHoGRVKy9zlJWgXu0ImksJvoM6jyybmgIhAIi4dU9wfSpIxaPILksO1uBBwnKWj4e%2F%2FGeAuDNGQyk%2FKpgDCMj%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FwEQABoMNjU0NjU0NTA5Njk1IgxmKibGorcNfvIlPPYq7AJ%2FiKRrJPzMSq6xnWqFcoj61ivoIbtXj2fMpL8OFHvitjQ6xod9ynTZtig2j4fI6daLmPUqc8wk3jpEWDxCz3hkQcrVghRA6aoqU3hP7TIvPdhbrKB74l4LeT9CTiraHliYqaD8RTE5VQoB82sbxRldKW34Efg%2FWVifEcsyur5uUrw6n3NE%2BUVkqyCOZ0oTgmnkb2rlQPhuMcv6gA%2FKOiMYVHc7WUb6DM8WwFhFVvHYPfozDy%2B%2F%2BKl9fpS%2F5yEsJrBxQ%2F1MNLT%2F8oT2MJCGmYfaxLN0obfc5jyNcdykJwvH9e%2BRo2bR%2BGl1tWwRCg2lM17oS4CWyxdd%2BMLEICqPOA3wbTwoXav4gyJcwVQoc0LOB9s2%2FNJSJDeTsYYCyIo459FVluRWCCFb86shYM%2F5ANEzSWmS4S8pcoN13%2B2MCUMCzUXS%2FxkvCr%2BA%2BJyUTXGJ6cTvSvNxMVLVI%2FlL3u%2Bxeij2Udli1L0mlRKfX3QgMJ%2BjqskGOpwBoB3aayBcnKCmcGrDmxjNan7DG7EPk4srGeTc9%2FWmjMsGuzvoyeqNZUTVix55DTa8QLsCCJiujOKV0IjJ%2Fsr1wUh4KuFBFWyD79a4DpYbBY5ZxcsPttPqxUAcuV2N3xcHdIpy3XpdnweISWZyTgiKMH1bgmnAPrHU61Wlk28tA%2FlLCW4cc7%2F1VZ3u5RRHqnX4EVR4MpOL24baDlpk, headers: {content-type: image/jpeg, x-amz-server-side-encryption: AES256, x-amzn-trace-id: Root=1-692a919f-03ec89e5301f3fa7374d64fc;Parent=5b49f8c0c6e71872;Sampled=1;Lineage=1:41d6e23e:0, content-length: 82091}}, request_id: 0eee3192-eb51-4f7e-aed6-5893f263929b} */
+  Future<Map<String, dynamic>> getAvatarUploadUrl(
+    String user_id, {
+    required String file_ext,
+    required int file_size,
+  }) async {
+    return await retryWithTokenRefresh(() async {
+      // Validate file extension
+      const validExtensions = [
+        'apng', 'png', 'avif', 'gif', 'jpg', 'jpeg',
+        'jfif', 'pjpeg', 'pjp', 'svg', 'webp'
+      ];
+      
+      if (!validExtensions.contains(file_ext.toLowerCase())) {
+        throw Exception(
+          'Invalid file extension. Must be one of: ${validExtensions.join(', ')}'
+        );
+      }
+
+      // Validate file size (1 byte to 256 KB)
+      if (file_size < 1 || file_size > 262144) {
+        throw Exception(
+          'Invalid file size. Must be between 1 and 262,144 bytes (256 KB)'
+        );
+      }
+
+      // Build URL with query parameters
+      final uploadUrl = Uri.parse('$_baseUrl/user/$user_id/upload_url').replace(
+        queryParameters: {
+          'file_ext': file_ext,
+          'file_size': file_size.toString(),
+        },
+      );
+
+      print('Requesting avatar upload URL for user $user_id');
+      print('File extension: $file_ext, File size: $file_size bytes');
+
+      final response = await http.get(
+        uploadUrl,
+        headers: {
+          'Authorization': this.accessToken!,
+        },
+      );
+
+      final responseData = jsonDecode(response.body) as Map<String, dynamic>;
+      print('Avatar Upload URL Response: $responseData');
+
+      if (response.statusCode != 200) {
+        throw Exception(
+          'Failed to get avatar upload URL: ${responseData['message'] ?? 'Unknown error'}'
+        );
+      }
+
+      // Extract the pre-signed URL details from payload
+      final payload = responseData['payload'] as Map<String, dynamic>?;
+      if (payload == null) {
+        throw Exception('No payload in response');
+      }
+
+      return {
+        'success': true,
+        'message': 'Avatar upload URL retrieved successfully',
+        'method': payload['method'], // Should be "POST"
+        'uri': payload['uri'], // The pre-signed S3 URL
+        'headers': payload['headers'], // Headers to use for upload
+        'request_id': responseData['request_id'],
+      };
+    });
+  }
+
+  Future<Map<String, dynamic>> getMessageHistory(user_id, other_user_id) async {
     return await retryWithTokenRefresh(() async {
       final addUsersUrl =
           Uri.parse('$_baseUrl/chat/$user_id/$other_user_id/messages');
@@ -967,14 +1263,14 @@ class ApiService {
       return await apiCall();
     } catch (e) {
       final errorString = e.toString().toLowerCase();
-      
+
       // Check if it's an authentication error (401 or 403)
       final isAuthError = errorString.contains('401') ||
-                         errorString.contains('403') ||
-                         errorString.contains('unauthorized') ||
-                         errorString.contains('forbidden') ||
-                         errorString.contains('token expired');
-      
+          errorString.contains('403') ||
+          errorString.contains('unauthorized') ||
+          errorString.contains('forbidden') ||
+          errorString.contains('token expired');
+
       if (isAuthError && canRefreshToken) {
         print('Authentication error detected: $e');
         print('Attempting token refresh...');

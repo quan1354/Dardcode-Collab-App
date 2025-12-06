@@ -99,13 +99,19 @@ class _LoginFormState extends State<LoginForm> {
 
       if (!mounted) return;
       Navigator.pop(context);
-      DialogUtils.showSuccess(context, 'Login successful!');
+      // DialogUtils.showSuccess(context, 'Login successful!');
 
       // Request location on supported platforms
       if (_supportsLocation) {
         await _requestLocationPermission();
         if (_locationData != null) {
           print('User Location - Lat: ${_locationData!.latitude}, Long: ${_locationData!.longitude}');
+          
+          // Store location in ApiService for automatic use in findNearbyUsers
+          _apiService.setUserLocation(
+            _locationData!.latitude!,
+            _locationData!.longitude!,
+          );
         }
       }
 
@@ -194,7 +200,7 @@ class _LoginFormState extends State<LoginForm> {
                   PrimaryButton(
                     text: 'Login',
                     onPressed: _submitForm,
-                    isLoading: _isLoading,
+                    // isLoading: _isLoading,
                   ),
                   const SizedBox(height: 20),
                 ],
