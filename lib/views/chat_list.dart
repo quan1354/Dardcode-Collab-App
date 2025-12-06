@@ -977,7 +977,21 @@ class _ChatListState extends State<ChatList> {
   // Build subtitle with typing indicator or last message - Quick Win 3 & 5
   Widget _buildSubtitle(Map<String, dynamic> friend, bool isOnline, String? status) {
     final isTyping = friend['is_typing'] ?? false;
-    final lastMessage = friend['last_message']?['message']?['text'];
+    
+    // Handle different last_message structures
+    String? lastMessage;
+    final lastMessageData = friend['last_message'];
+    if (lastMessageData != null) {
+      final messageContent = lastMessageData['message'];
+      if (messageContent is Map<String, dynamic>) {
+        // If message is an object with 'text' field
+        lastMessage = messageContent['text'];
+      } else if (messageContent is String) {
+        // If message is a direct string (e.g., "deleted")
+        lastMessage = messageContent;
+      }
+    }
+    
     final unreadCount = friend['unread_count'] ?? 0;
     final lastSeen = friend['last_seen'];
 

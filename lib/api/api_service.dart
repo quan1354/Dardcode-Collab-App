@@ -514,7 +514,6 @@ class ApiService {
       final uri = Uri.parse('$_baseUrl/user/list').replace(
         queryParameters: queryParams,
       );
-      print('NearBy Users URL: $uri');
 
       print('Finding nearby users with params: $queryParams');
 
@@ -526,18 +525,27 @@ class ApiService {
       );
 
       if (response.statusCode == 200) {
-        final responseData = jsonDecode(response.body) as Map<String, dynamic>;
-
-        if (responseData['payload'] != null &&
-            responseData['payload']['results'] != null) {
-          final usersData = responseData['payload']['results'] as List;
-          print('Found ${usersData.length} nearby users');
-          return usersData.map((userJson) => User.fromJson(userJson)).toList();
-        } else {
-          throw Exception('No user data found');
+        final responseData = jsonDecode(response.body) as Map<String, dynamic>?;
+        
+        if (responseData == null) {
+          throw Exception('Null response from server');
         }
+
+        final payload = responseData['payload'] as Map<String, dynamic>?;
+        if (payload == null) {
+          throw Exception('No payload in response');
+        }
+
+        final results = payload['results'] as List?;
+        if (results == null) {
+          throw Exception('No results in payload');
+        }
+
+        print('Found ${results.length} nearby users');
+        return results.map((userJson) => User.fromJson(userJson as Map<String, dynamic>)).toList();
       } else {
-        throw Exception('Failed to fetch users: ${response.statusCode}');
+        final errorBody = response.body.isNotEmpty ? response.body : 'No error details';
+        throw Exception('Failed to fetch users: ${response.statusCode} - $errorBody');
       }
     });
   }
@@ -582,26 +590,34 @@ class ApiService {
       );
 
       if (response.statusCode == 200) {
-        final responseData = jsonDecode(response.body) as Map<String, dynamic>;
+        final responseData = jsonDecode(response.body) as Map<String, dynamic>?;
+        
+        if (responseData == null) {
+          throw Exception('Null response from server');
+        }
+        
         print(responseData);
 
-        if (responseData['payload'] != null &&
-            responseData['payload']['results'] != null &&
-            (responseData['payload']['results'] as List).isNotEmpty) {
-          final results = responseData['payload']['results'] as List<dynamic>;
+        final payload = responseData['payload'] as Map<String, dynamic>?;
+        if (payload == null) {
+          throw Exception('No payload in response');
+        }
 
-          if (returnList) {
-            // Return the entire list for batch operations
-            return results;
-          } else {
-            // Return single user (for backward compatibility)
-            return User.fromJson(results[0]);
-          }
-        } else {
+        final results = payload['results'] as List?;
+        if (results == null || results.isEmpty) {
           throw Exception('No user data found');
         }
+
+        if (returnList) {
+          // Return the entire list for batch operations
+          return results;
+        } else {
+          // Return single user (for backward compatibility)
+          return User.fromJson(results[0] as Map<String, dynamic>);
+        }
       } else {
-        throw Exception('Failed to fetch user: ${response.statusCode}');
+        final errorBody = response.body.isNotEmpty ? response.body : 'No error details';
+        throw Exception('Failed to fetch user: ${response.statusCode} - $errorBody');
       }
     });
   }
@@ -873,12 +889,21 @@ class ApiService {
         },
       );
 
-      final responseData = jsonDecode(response.body) as Map<String, dynamic>;
+      if (response.body.isEmpty) {
+        throw Exception('Empty response from server');
+      }
+
+      final responseData = jsonDecode(response.body) as Map<String, dynamic>?;
+      
+      if (responseData == null) {
+        throw Exception('Null response from server');
+      }
+      
       print('Get Messages History Response: $responseData');
 
       if (response.statusCode != 200) {
-        throw Exception(
-            'Get Messages History Response failed: ${responseData['message']}');
+        final errorMsg = responseData['message'] ?? 'Unknown error';
+        throw Exception('Get Messages History Response failed: $errorMsg');
       }
 
       return {'success': true, 'message': responseData};

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Allow cleartext traffic for CloudFront and WebSocket -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">d3v904dal0xey8.cloudfront.net</domain>
+        <domain includeSubdomains="true">srqaesich3.execute-api.us-east-1.amazonaws.com</domain>
+    </domain-config>
+    
+    <!-- Trust system certificates and user-added certificates -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

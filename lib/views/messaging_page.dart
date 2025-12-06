@@ -184,18 +184,29 @@ class _MessagingPageState extends State<MessagingPage> {
         return;
       }
 
-      // Check if this is a payload response (edit/delete actions)
+      // Check if this is a payload response
       if (messageData['payload'] != null && messageData['payload']['action'] != null) {
         final payload = messageData['payload'] as Map<String, dynamic>;
-        final action = payload['action'] as Map<String, dynamic>;
-        final actionType = action['action'] as String?;
+        final actionField = payload['action'];
 
-        if (actionType == 'edit_message') {
-          _handleEditMessageEvent(payload);
-          return;
-        } else if (actionType == 'delete_message') {
-          _handleDeleteMessageEvent(payload);
-          return;
+        // Handle different action types
+        if (actionField is String) {
+          // Simple action string like "send_message"
+          if (actionField == 'send_message') {
+            _handleSendMessageEvent(payload);
+            return;
+          }
+        } else if (actionField is Map<String, dynamic>) {
+          // Nested action object for edit/delete
+          final actionType = actionField['action'] as String?;
+          
+          if (actionType == 'edit_message') {
+            _handleEditMessageEvent(payload);
+            return;
+          } else if (actionType == 'delete_message') {
+            _handleDeleteMessageEvent(payload);
+            return;
+          }
         }
       }
 
@@ -288,6 +299,65 @@ class _MessagingPageState extends State<MessagingPage> {
     print('${widget.friendUsername} is typing...');
   }
 
+  /// Handle send_message event from WebSocket
+  void _handleSendMessageEvent(Map<String, dynamic> payload) {
+    try {
+      final currentUserId = _getUserIdFromToken(widget.accessToken);
+      final senderId = payload['sender_id']?.toString();
+      final isSentByMe = senderId == currentUserId;
+      final serverCreatedAt = payload['created_at'] as int?;
+      final messageObj = payload['message'] as Map<String, dynamic>?;
+
+      if (messageObj == null || serverCreatedAt == null) {
+        print('Invalid send_message payload');
+        return;
+      }
+
+      final messageText = messageObj['text'] as String? ?? '';
+      final isEdited = messageObj['edited'] as bool? ?? false;
+
+      // If this is our own message, try to find and update the local version
+      if (isSentByMe) {
+        final existingMessageIndex = _messages.indexWhere(
+          (msg) => msg['text'] == messageText && msg['isSentByMe'] == true && msg['status'] == 'sent',
+        );
+
+        if (existingMessageIndex != -1) {
+          // Update the existing message with server's created_at
+          _safeSetState(() {
+            _messages[existingMessageIndex]['created_at'] = serverCreatedAt;
+            _messages[existingMessageIndex]['status'] = 'delivered';
+            _messages[existingMessageIndex]['timestamp'] = DateTime.fromMillisecondsSinceEpoch(serverCreatedAt);
+            _messages[existingMessageIndex]['edited'] = isEdited;
+          });
+          print('Updated local message with server created_at: $serverCreatedAt');
+          _scrollToBottom(); // Scroll even when updating existing message
+          return; // Don't add duplicate
+        }
+      }
+
+      // If not found or it's from friend, add as new message
+      final newMessage = {
+        'id': serverCreatedAt.toString(),
+        'text': messageText,
+        'isSentByMe': isSentByMe,
+        'timestamp': DateTime.fromMillisecondsSinceEpoch(serverCreatedAt),
+        'status': 'delivered',
+        'sender_id': senderId,
+        'created_at': serverCreatedAt,
+        'edited': isEdited,
+      };
+
+      _safeSetState(() {
+        _messages.add(newMessage);
+      });
+
+      _scrollToBottom();
+    } catch (e) {
+      print('Error handling send_message event: $e');
+    }
+  }
+
   void _handleNewMessage(Map<String, dynamic> messageData) {
     try {
       final currentUserId = _getUserIdFromToken(widget.accessToken);
@@ -296,13 +366,38 @@ class _MessagingPageState extends State<MessagingPage> {
 
       // Only process if this message is relevant to current conversation
       if (senderId == widget.friendId || senderId == currentUserId) {
+        final messageText = messageData['event']['message'] ?? '';
+        final serverCreatedAt = messageData['created_at'] as int?;
+
+        // If this is our own message, try to find and update the local version
+        if (isSentByMe && serverCreatedAt != null) {
+          final existingMessageIndex = _messages.indexWhere(
+            (msg) => msg['text'] == messageText && msg['isSentByMe'] == true && msg['status'] == 'sent',
+          );
+
+          if (existingMessageIndex != -1) {
+            // Update the existing message with server's created_at
+            _safeSetState(() {
+              _messages[existingMessageIndex]['created_at'] = serverCreatedAt;
+              _messages[existingMessageIndex]['status'] = 'delivered';
+              _messages[existingMessageIndex]['timestamp'] = DateTime.fromMillisecondsSinceEpoch(serverCreatedAt);
+            });
+            print('Updated local message with server created_at: $serverCreatedAt');
+            return; // Don't add duplicate
+          }
+        }
+
+        // If not found or it's from friend, add as new message
         final newMessage = {
-          'id': DateTime.now().millisecondsSinceEpoch.toString(),
-          'text': messageData['event']['message'] ?? '',
+          'id': (serverCreatedAt ?? DateTime.now().millisecondsSinceEpoch).toString(),
+          'text': messageText,
           'isSentByMe': isSentByMe,
-          'timestamp': DateTime.now(),
+          'timestamp': serverCreatedAt != null
+              ? DateTime.fromMillisecondsSinceEpoch(serverCreatedAt)
+              : DateTime.now(),
           'status': 'delivered',
           'sender_id': senderId,
+          'created_at': serverCreatedAt ?? DateTime.now().millisecondsSinceEpoch,
         };
 
         _safeSetState(() {
