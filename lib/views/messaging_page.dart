@@ -194,10 +194,23 @@ class _MessagingPageState extends State<MessagingPage> {
 
         // Handle different action types
         if (actionField is String) {
-          // Simple action string like "send_message"
+          // Simple action string like "send_message" (could be typing or actual message)
           if (actionField == 'send_message') {
-            _handleSendMessageEvent(payload);
-            return;
+            // Check if this is a typing indicator (no message field) or actual message
+            final userId = payload['user_id']?.toString();
+            
+            // If user_id matches friend and no message/created_at, it's a typing indicator
+            if (userId == widget.friendId &&
+                payload['message'] == null &&
+                payload['created_at'] == null) {
+              // This is a typing indicator
+              _handleTypingEvent(payload);
+              return;
+            } else if (payload['message'] != null || payload['created_at'] != null) {
+              // This is an actual message
+              _handleSendMessageEvent(payload);
+              return;
+            }
           }
         } else if (actionField is Map<String, dynamic>) {
           // Nested action object for edit/delete
@@ -297,24 +310,37 @@ class _MessagingPageState extends State<MessagingPage> {
     }
   }
 
-  void _handleTypingEvent(Map<String, dynamic> messageData) {
-    // Show typing indicator for the friend
-    print('${widget.friendUsername} is typing...');
-    
-    // Cancel previous timer
-    _friendTypingTimer?.cancel();
-    
-    // Set friend typing to true
-    _safeSetState(() {
-      _isFriendTyping = true;
-    });
-    
-    // Auto-hide typing indicator after 3 seconds of no typing events
-    _friendTypingTimer = Timer(const Duration(seconds: 3), () {
-      _safeSetState(() {
-        _isFriendTyping = false;
-      });
-    });
+  void _handleTypingEvent(Map<String, dynamic> payload) {
+    try {
+      final userId = payload['user_id']?.toString();
+      
+      // Only show typing indicator if it's from the current friend
+      if (userId == widget.friendId) {
+        print('${widget.friendUsername} is typing...');
+        
+        // Cancel previous timer
+        _friendTypingTimer?.cancel();
+        
+        // Set friend typing to true
+        _safeSetState(() {
+          _isFriendTyping = true;
+        });
+        
+        // Scroll to bottom to show typing indicator
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _scrollToBottom();
+        });
+        
+        // Auto-hide typing indicator after 3 seconds of no typing events
+        _friendTypingTimer = Timer(const Duration(seconds: 3), () {
+          _safeSetState(() {
+            _isFriendTyping = false;
+          });
+        });
+      }
+    } catch (e) {
+      print('Error handling typing event: $e');
+    }
   }
 
   /// Handle send_message event from WebSocket
