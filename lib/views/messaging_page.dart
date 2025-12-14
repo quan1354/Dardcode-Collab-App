@@ -684,14 +684,22 @@ class _MessagingPageState extends State<MessagingPage> {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                Text(
-                  widget.friendStatus,
-                  style: TextStyle(
-                    color: widget.friendStatus.toLowerCase() == 'online'
-                        ? Colors.green[400]
-                        : Colors.grey[400],
-                    fontSize: 12,
-                  ),
+                Row(
+                  children: [
+                    _buildStatusIcon(
+                      widget.friendStatus,
+                      _getStatusColor(widget.friendStatus),
+                      size: 8,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      _getStatusLabel(widget.friendStatus),
+                      style: TextStyle(
+                        color: _getStatusColor(widget.friendStatus),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -1631,6 +1639,124 @@ class _MessagingPageState extends State<MessagingPage> {
     }
   }
 
+  /// Get status color based on status value
+  Color _getStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'online':
+        return Colors.green;
+      case 'idle':
+        return Colors.orange;
+      case 'do_not_disturb':
+      case 'dnd':
+        return Colors.red;
+      case 'invisible':
+        return Colors.grey;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  /// Get human-readable status label
+  String _getStatusLabel(String status) {
+    switch (status.toLowerCase()) {
+      case 'online':
+        return 'Online';
+      case 'idle':
+        return 'Idle';
+      case 'do_not_disturb':
+      case 'dnd':
+        return 'Do Not Disturb';
+      case 'invisible':
+        return 'Invisible';
+      default:
+        return status;
+    }
+  }
+
+  /// Build status icon widget (Discord-style)
+  Widget _buildStatusIcon(String status, Color color, {double size = 8}) {
+    switch (status.toLowerCase()) {
+      case 'online':
+        // Green circle for online
+        return Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+          ),
+        );
+      case 'idle':
+        // Hollow circle with ring effect for idle
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            // Outer orange circle
+            Container(
+              width: size,
+              height: size,
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
+              ),
+            ),
+            // Inner hollow part (creates ring effect)
+            Container(
+              width: size * 0.65,
+              height: size * 0.65,
+              decoration: BoxDecoration(
+                color: AppConstants.mainBGColor,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ],
+        );
+      case 'do_not_disturb':
+      case 'dnd':
+        // Circle with minus sign for do not disturb
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            Container(
+              width: size,
+              height: size,
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
+              ),
+            ),
+            Container(
+              width: size * 0.6,
+              height: size * 0.15,
+              decoration: BoxDecoration(
+                color: AppConstants.mainBGColor,
+                borderRadius: BorderRadius.circular(size * 0.1),
+              ),
+            ),
+          ],
+        );
+      case 'invisible':
+        // Grey circle outline for invisible
+        return Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            color: Colors.transparent,
+            shape: BoxShape.circle,
+            border: Border.all(color: color, width: size * 0.15),
+          ),
+        );
+      default:
+        return Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+          ),
+        );
+    }
+  }
 
   Widget _buildInfoRow(String label, String value) {
     return Padding(

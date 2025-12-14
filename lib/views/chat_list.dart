@@ -8,23 +8,19 @@ import 'package:darkord/views/login.dart';
 import 'package:darkord/utils/token_utils.dart';
 import 'package:darkord/widgets/common_widgets.dart';
 import 'dart:convert';
-
 class ChatList extends StatefulWidget {
   final String accessToken;
   final Map<String, dynamic>? loginPayload;
   final ApiService apiService;
-
   const ChatList({
     super.key,
     required this.accessToken,
     this.loginPayload,
     required this.apiService,
   });
-
   @override
   State<ChatList> createState() => _ChatListState();
 }
-
 class _ChatListState extends State<ChatList> {
   String _currentStatus = 'online';
   Map<String, dynamic>? _userData;
@@ -35,26 +31,21 @@ class _ChatListState extends State<ChatList> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   int _currentIndex = 0; // For bottom navigation
-
   // Bottom navigation pages
   final List<Widget> _pages = [];
-
   @override
   void initState() {
     super.initState();
-
     _fetchUserDataWithToken(widget.accessToken);
     widget.apiService.debugConnectionStatus();
     widget.apiService.addMessageHandler(_handleWebSocketMessage);
   }
-
   @override
   void dispose() {
     _searchController.dispose();
     widget.apiService.removeMessageHandler(_handleWebSocketMessage);
     super.dispose();
   }
-
 // ===================== COMMON FUNCTIONS =====================
   void _fetchUserDataWithToken(String accessToken) async {
     try {
@@ -63,7 +54,6 @@ class _ChatListState extends State<ChatList> {
       if (userId == null) {
         throw Exception('Could not extract user ID from token');
       }
-
       final user = await widget.apiService.fetchUsers(accessToken, userId);
       setState(() {
         _userData = {
@@ -75,7 +65,6 @@ class _ChatListState extends State<ChatList> {
           'avatar_url': user.avatarUrl,
         };
       });
-
       // Fetch friends after user data is loaded
       _fetchCurrentUserFriends(accessToken, user.userId.toString());
     } catch (error) {
@@ -85,32 +74,26 @@ class _ChatListState extends State<ChatList> {
       });
     }
   }
-
   void _handleWebSocketMessage(dynamic message) {
     // Handle global WebSocket messages
     print('Global message: $message');
   }
-
   String _formatLastChatTime(dynamic lastChatAt) {
     if (lastChatAt == null || lastChatAt == 0) {
       return '00:00';
     }
-
     try {
       // Handle the timestamp (assuming it's in milliseconds)
       final timestamp = int.tryParse(lastChatAt.toString());
       if (timestamp == null || timestamp <= 0) {
         return '00:00';
       }
-
       // Check if it's the invalid timestamp you mentioned
       if (timestamp == 9999999999999) {
         return '00:00';
       }
-
       final date = DateTime.fromMillisecondsSinceEpoch(timestamp);
       final now = DateTime.now();
-
       // If same day, show time, otherwise show date
       if (date.year == now.year &&
           date.month == now.month &&
@@ -124,18 +107,15 @@ class _ChatListState extends State<ChatList> {
       return '00:00';
     }
   }
-
   String _getLastMessage(dynamic lastMessage) {
     if (lastMessage == null || lastMessage.toString().isEmpty) {
       return 'No messages yet';
     }
     return lastMessage.toString();
   }
-
   void _filterChats(String query) {
     setState(() {
       _searchQuery = query.toLowerCase().trim();
-
       if (_searchQuery.isEmpty) {
         _filteredFriendsList = _friendsList;
       } else {
@@ -145,7 +125,6 @@ class _ChatListState extends State<ChatList> {
           final username = userDetails?['username']?.toLowerCase() ?? '';
           final lastMessage =
               _getLastMessage(friend['last_message']).toLowerCase();
-
           // Search by username or last message
           return username.contains(_searchQuery) ||
               lastMessage.contains(_searchQuery) ||
@@ -154,7 +133,6 @@ class _ChatListState extends State<ChatList> {
       }
     });
   }
-
   void _navigateToAddFriend() {
     Navigator.push(
       context,
@@ -174,43 +152,33 @@ class _ChatListState extends State<ChatList> {
       }
     });
   }
-
 // ===================== LOAD CURRENT USER FRIENDS =====================
   void _fetchCurrentUserFriends(String accessToken, String userId) async {
     try {
       setState(() {
         _isLoadingFriends = true;
       });
-
       print('Fetching friends for user: $userId with token: $accessToken');
-
       final friendsResponse =
           await widget.apiService.fetchChatUsers(accessToken, userId);
       print('Fetch Users Response: $friendsResponse');
-
       List<dynamic> results = [];
-
       // Fixed: Handle different response structures
       if (friendsResponse['data']['payload']['results'] is List) {
         results = friendsResponse['data']['payload']['results'];
       }
-
       print('Extracted results: $results');
       print('Results length: ${results.length}');
-
       // Extract all friend user IDs for batch fetching
       final friendUserIds = results
           .map<String>((friend) => friend['user_id'].toString())
           .where((id) => id.isNotEmpty)
           .toList();
-
       print('Friend user IDs to fetch: $friendUserIds');
-
       if (friendUserIds.isNotEmpty) {
         // Fetch all user details in a single batch request
         await _fetchUserDetailsBatch(accessToken, friendUserIds);
       }
-
       setState(() {
         _friendsList = results;
         _filteredFriendsList = results; // Initialize filtered list
@@ -223,19 +191,15 @@ class _ChatListState extends State<ChatList> {
       });
     }
   }
-
   Future<void> _fetchUserDetailsBatch(
       String accessToken, List<String> userIds) async {
     try {
       if (userIds.isEmpty) return;
-
       // Join all user IDs with commas for the batch request
       final userIdsString = userIds.join(',');
       print('Batch fetching user details for IDs: $userIdsString');
-
       final batchUserDetails = await widget.apiService
           .fetchUsers(accessToken, userIdsString, returnList: true);
-
       // Process the batch response and update cache
       for (var userData in batchUserDetails) {
         final userId = userData['identity']['user_id'].toString();
@@ -255,7 +219,6 @@ class _ChatListState extends State<ChatList> {
       await _fetchUserDetailsIndividualFallback(accessToken, userIds);
     }
   }
-
   Future<void> _fetchUserDetailsIndividualFallback(
       String accessToken, List<String> userIds) async {
     // Fallback to individual requests if batch fails
@@ -285,7 +248,6 @@ class _ChatListState extends State<ChatList> {
       }
     }
   }
-
 // ==================== WIDGETS PARTS =====================
   Widget _buildLoadingIndicator() {
     return Center(
@@ -309,7 +271,6 @@ class _ChatListState extends State<ChatList> {
       ),
     );
   }
-
   Widget _buildEmptyState() {
     return const EmptyState(
       icon: Icons.chat_bubble_outline,
@@ -317,7 +278,6 @@ class _ChatListState extends State<ChatList> {
       subtitle: 'Add friends to start chatting',
     );
   }
-
   Widget _buildSearchEmptyState() {
     return EmptyState(
       icon: Icons.search_off,
@@ -336,7 +296,6 @@ class _ChatListState extends State<ChatList> {
       ),
     );
   }
-
   Widget _buildCommunityPage() {
     return Scaffold(
       backgroundColor: AppConstants.mainBGColor,
@@ -371,7 +330,6 @@ class _ChatListState extends State<ChatList> {
       ),
     );
   }
-
   Widget _buildSettingsPage() {
     return Scaffold(
       backgroundColor: AppConstants.mainBGColor,
@@ -406,7 +364,6 @@ class _ChatListState extends State<ChatList> {
       ),
     );
   }
-
   Widget _buildMessagesPage() {
     return CustomScrollView(
       slivers: [
@@ -488,7 +445,6 @@ class _ChatListState extends State<ChatList> {
             ),
           ),
         ),
-
         // Friends List Section
         if (_isLoadingFriends)
           SliverFillRemaining(
@@ -515,7 +471,6 @@ class _ChatListState extends State<ChatList> {
       ],
     );
   }
-
   Widget _buildCurrentPage() {
     switch (_currentIndex) {
       case 0:
@@ -528,7 +483,6 @@ class _ChatListState extends State<ChatList> {
         return _buildMessagesPage();
     }
   }
-
   Widget _buildUserDrawer() {
     return Drawer(
       backgroundColor: Colors.grey[900],
@@ -636,10 +590,9 @@ class _ChatListState extends State<ChatList> {
                         _buildStatusMenuItem('online', Colors.green, 'Online'),
                         _buildStatusMenuItem('idle', Colors.orange, 'Idle'),
                         _buildStatusMenuItem(
-                            'dnd', Colors.red, 'Do Not Disturb'),
+                            'do_not_disturb', Colors.red, 'Do Not Disturb'),
                         _buildStatusMenuItem(
                             'invisible', Colors.grey, 'Invisible'),
-                        _buildStatusMenuItem('offline', Colors.grey, 'Offline'),
                       ],
                       onChanged: (String? newValue) async {
                         if (newValue != null && newValue != _currentStatus) {
@@ -715,12 +668,10 @@ class _ChatListState extends State<ChatList> {
                 ElevatedButton.icon(
                   onPressed: () async {
                     print('Logging out user');
-
                     try {
                       // Add 'await' and make the callback 'async'
                       final response = await widget.apiService
                           .logoutUser(widget.accessToken);
-
                       if (response['success'] == true) {
                         Navigator.pushAndRemoveUntil(
                           context,
@@ -760,7 +711,6 @@ class _ChatListState extends State<ChatList> {
       ),
     );
   }
-
   Widget _buildBottomNavigationBar() {
     return Container(
       decoration: BoxDecoration(
@@ -820,7 +770,6 @@ class _ChatListState extends State<ChatList> {
       ),
     );
   }
-
   Widget _buildChatListItem(Map<String, dynamic> friend) {
     final friendUserId = friend['user_id'].toString();
     final userDetails = _userDetailsCache[friendUserId];
@@ -830,7 +779,6 @@ class _ChatListState extends State<ChatList> {
     final unreadCount = friend['unread_count'] ?? 0;
     final isOnline = status?.toLowerCase() == 'online';
     final isPinned = friend['is_pinned'] ?? false;
-
     return ListTile(
       tileColor: isPinned ? Colors.grey[850] : null,
       leading: GestureDetector(
@@ -864,8 +812,8 @@ class _ChatListState extends State<ChatList> {
                   ? const Icon(Icons.person, color: Colors.white)
                   : null,
             ),
-            // Online status dot - Quick Win 4
-            if (isOnline)
+            // Status indicator with Discord-style icons - Quick Win 4
+            if (status != null && status.toLowerCase() != 'invisible')
               Positioned(
                 right: 0,
                 bottom: 0,
@@ -873,13 +821,13 @@ class _ChatListState extends State<ChatList> {
                   width: 14,
                   height: 14,
                   decoration: BoxDecoration(
-                    color: Colors.green,
                     shape: BoxShape.circle,
                     border: Border.all(
                       color: AppConstants.mainBGColor,
                       width: 2,
                     ),
                   ),
+                  child: _buildStatusIcon(status, _getStatusColor(status), size: 14),
                 ),
               ),
           ],
@@ -952,12 +900,11 @@ class _ChatListState extends State<ChatList> {
               friendId: friendUserId,
               friendUsername: username,
               friendAvatarUrl: avatarUrl,
-              friendStatus: status ?? 'offline',
+              friendStatus: status ?? 'invisible',
               apiService: widget.apiService,
             ),
           ),
         );
-
         // Refresh chat list when returning from messaging page
         if (_userData != null && _userData!['user_id'] != null) {
           print('Refreshing chat list after returning from messaging');
@@ -970,12 +917,10 @@ class _ChatListState extends State<ChatList> {
       onLongPress: () => _showChatOptions(friend, friendUserId, username),
     );
   }
-
   // Build subtitle with typing indicator or last message - Quick Win 3 & 5
   Widget _buildSubtitle(
       Map<String, dynamic> friend, bool isOnline, String? status) {
     final isTyping = friend['is_typing'] ?? false;
-
     // Handle different last_message structures
     String? lastMessage;
     final lastMessageData = friend['last_message'];
@@ -989,10 +934,8 @@ class _ChatListState extends State<ChatList> {
         lastMessage = messageContent;
       }
     }
-
     final unreadCount = friend['unread_count'] ?? 0;
     final lastSeen = friend['last_seen'];
-
     if (isTyping) {
       return Row(
         children: [
@@ -1009,8 +952,6 @@ class _ChatListState extends State<ChatList> {
         ],
       );
     }
-
-    // Show last seen if offline
     if (!isOnline && lastSeen != null) {
       final lastSeenText = _formatLastSeen(lastSeen);
       if (lastSeenText.isNotEmpty) {
@@ -1025,7 +966,6 @@ class _ChatListState extends State<ChatList> {
         );
       }
     }
-
     return Text(
       _getLastMessage(lastMessage),
       style: TextStyle(
@@ -1036,7 +976,6 @@ class _ChatListState extends State<ChatList> {
       overflow: TextOverflow.ellipsis,
     );
   }
-
   // Animated typing dots - Quick Win 3
   Widget _buildTypingDots() {
     return Row(
@@ -1055,11 +994,9 @@ class _ChatListState extends State<ChatList> {
       }),
     );
   }
-
   // Format last seen time - Quick Win 5
   String _formatLastSeen(dynamic lastSeen) {
     if (lastSeen == null) return '';
-
     try {
       DateTime lastSeenTime;
       if (lastSeen is int) {
@@ -1069,10 +1006,8 @@ class _ChatListState extends State<ChatList> {
       } else {
         return '';
       }
-
       final now = DateTime.now();
       final difference = now.difference(lastSeenTime);
-
       if (difference.inMinutes < 1) {
         return 'last seen just now';
       } else if (difference.inMinutes < 60) {
@@ -1090,12 +1025,10 @@ class _ChatListState extends State<ChatList> {
       return '';
     }
   }
-
   // Long press chat options (pin/unpin, delete, etc.) - Quick Win 8
   void _showChatOptions(
       Map<String, dynamic> friend, String friendUserId, String username) {
     final isPinned = friend['is_pinned'] ?? false;
-
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.grey[900],
@@ -1153,7 +1086,6 @@ class _ChatListState extends State<ChatList> {
       ),
     );
   }
-
   void _togglePinChat(Map<String, dynamic> friend) {
     setState(() {
       friend['is_pinned'] = !(friend['is_pinned'] ?? false);
@@ -1167,7 +1099,6 @@ class _ChatListState extends State<ChatList> {
       });
       _filteredFriendsList = List.from(_friendsList);
     });
-
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -1177,7 +1108,6 @@ class _ChatListState extends State<ChatList> {
       ),
     );
   }
-
   void _deleteChat(Map<String, dynamic> friend, String username) {
     showDialog(
       context: context,
@@ -1216,22 +1146,14 @@ class _ChatListState extends State<ChatList> {
       ),
     );
   }
-
-  // Build status dropdown menu item
+  // Build status dropdown menu item with Discord-style icons
   DropdownMenuItem<String> _buildStatusMenuItem(
       String value, Color color, String label) {
     return DropdownMenuItem(
       value: value,
       child: Row(
         children: [
-          Container(
-            width: 12,
-            height: 12,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-            ),
-          ),
+          _buildStatusIcon(value, color, size: 12),
           const SizedBox(width: 12),
           Text(label),
         ],
@@ -1239,6 +1161,90 @@ class _ChatListState extends State<ChatList> {
     );
   }
 
+  // Build status icon widget (Discord-style)
+  Widget _buildStatusIcon(String status, Color color, {double size = 12}) {
+    switch (status.toLowerCase()) {
+      case 'online':
+        // Green circle for online
+        return Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+          ),
+        );
+      case 'idle':
+        // Hollow circle with ring effect for idle
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            // Outer orange circle
+            Container(
+              width: size,
+              height: size,
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
+              ),
+            ),
+            // Inner hollow part (creates ring effect)
+            Container(
+              width: size * 0.65,
+              height: size * 0.65,
+              decoration: BoxDecoration(
+                color: Colors.grey[900] ?? AppConstants.mainBGColor,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ],
+        );
+      case 'do_not_disturb':
+      case 'dnd':
+        // Circle with minus sign for do not disturb
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            Container(
+              width: size,
+              height: size,
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
+              ),
+            ),
+            Container(
+              width: size * 0.6,
+              height: size * 0.15,
+              decoration: BoxDecoration(
+                color: Colors.grey[900],
+                borderRadius: BorderRadius.circular(size * 0.1),
+              ),
+            ),
+          ],
+        );
+      case 'invisible':
+        // Grey circle for invisible
+        return Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            color: Colors.transparent,
+            shape: BoxShape.circle,
+            border: Border.all(color: color, width: size * 0.15),
+          ),
+        );
+      default:
+        return Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+          ),
+        );
+    }
+  }
   // Update user status via API
   Future<void> _updateUserStatus(String newStatus) async {
     try {
@@ -1247,7 +1253,6 @@ class _ChatListState extends State<ChatList> {
       if (userId == null) {
         throw Exception('User ID not found');
       }
-
       // Show loading indicator
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -1255,13 +1260,11 @@ class _ChatListState extends State<ChatList> {
           duration: Duration(seconds: 1),
         ),
       );
-
       // Call API to update status
       final response = await widget.apiService.updateUser(
         userId,
         status: newStatus,
       );
-
       if (response['success'] == true) {
         // Update local state
         setState(() {
@@ -1270,7 +1273,6 @@ class _ChatListState extends State<ChatList> {
             _userData!['status'] = newStatus;
           }
         });
-
         // Show success message
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1294,24 +1296,40 @@ class _ChatListState extends State<ChatList> {
     }
   }
 
+  // Get status color
+  Color _getStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'online':
+        return Colors.green;
+      case 'idle':
+        return Colors.orange;
+      case 'do_not_disturb':
+      case 'dnd':
+        return Colors.red;
+      case 'invisible':
+      case 'offline':
+        return Colors.grey;
+      default:
+        return Colors.grey;
+    }
+  }
+
   // Get human-readable status label
   String _getStatusLabel(String status) {
-    switch (status) {
+    switch (status.toLowerCase()) {
       case 'online':
         return 'Online';
       case 'idle':
         return 'Idle';
+      case 'do_not_disturb':
       case 'dnd':
         return 'Do Not Disturb';
       case 'invisible':
         return 'Invisible';
-      case 'offline':
-        return 'Offline';
       default:
         return status;
     }
   }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1322,3 +1340,4 @@ class _ChatListState extends State<ChatList> {
     );
   }
 }
+
