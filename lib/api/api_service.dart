@@ -462,18 +462,6 @@ class ApiService {
     }
   }
 
-  /// Find nearby users based on location
-  ///
-  /// Parameters:
-  /// - latitude: Optional latitude in degrees (defaults to stored user location)
-  /// - longitude: Optional longitude in degrees (defaults to stored user location)
-  /// - pageSize: Max number of users to return (default: 100)
-  /// - next: Next key for pagination
-  ///
-  /// Priority order:
-  /// 1. Explicitly provided latitude/longitude parameters
-  /// 2. Stored user location from login
-  /// 3. CloudFront distribution location (API fallback)
   Future<List<User>> findNearbyUsers({
     double? latitude,
     double? longitude,
@@ -806,8 +794,7 @@ class ApiService {
     });
   }
 
-  //*flutter: Avatar Upload URL Response: {code: 2000, message: , payload: {method: PUT, uri: https://darkord-stage-user-public.s3.us-east-1.amazonaws.com/avatar/10000048.jpg?x-id=PutObject&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=ASIAZQ3DTCJ75O3QZSUL%2F20251129%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20251129T062431Z&X-Amz-Expires=300&X-Amz-SignedHeaders=content-length%3Bcontent-type%3Bhost%3Bx-amz-server-side-encryption&X-Amz-Signature=7e91d6a3abb8c2acc7795f5f76ac4be5fbba09f022eeefeff794dcd74fc01e00&X-Amz-Security-Token=IQoJb3JpZ2luX2VjEP%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FwEaCXVzLWVhc3QtMSJIMEYCIQDDCVOF51fXYW%2FHoGRVKy9zlJWgXu0ImksJvoM6jyybmgIhAIi4dU9wfSpIxaPILksO1uBBwnKWj4e%2F%2FGeAuDNGQyk%2FKpgDCMj%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FwEQABoMNjU0NjU0NTA5Njk1IgxmKibGorcNfvIlPPYq7AJ%2FiKRrJPzMSq6xnWqFcoj61ivoIbtXj2fMpL8OFHvitjQ6xod9ynTZtig2j4fI6daLmPUqc8wk3jpEWDxCz3hkQcrVghRA6aoqU3hP7TIvPdhbrKB74l4LeT9CTiraHliYqaD8RTE5VQoB82sbxRldKW34Efg%2FWVifEcsyur5uUrw6n3NE%2BUVkqyCOZ0oTgmnkb2rlQPhuMcv6gA%2FKOiMYVHc7WUb6DM8WwFhFVvHYPfozDy%2B%2F%2BKl9fpS%2F5yEsJrBxQ%2F1MNLT%2F8oT2MJCGmYfaxLN0obfc5jyNcdykJwvH9e%2BRo2bR%2BGl1tWwRCg2lM17oS4CWyxdd%2BMLEICqPOA3wbTwoXav4gyJcwVQoc0LOB9s2%2FNJSJDeTsYYCyIo459FVluRWCCFb86shYM%2F5ANEzSWmS4S8pcoN13%2B2MCUMCzUXS%2FxkvCr%2BA%2BJyUTXGJ6cTvSvNxMVLVI%2FlL3u%2Bxeij2Udli1L0mlRKfX3QgMJ%2BjqskGOpwBoB3aayBcnKCmcGrDmxjNan7DG7EPk4srGeTc9%2FWmjMsGuzvoyeqNZUTVix55DTa8QLsCCJiujOKV0IjJ%2Fsr1wUh4KuFBFWyD79a4DpYbBY5ZxcsPttPqxUAcuV2N3xcHdIpy3XpdnweISWZyTgiKMH1bgmnAPrHU61Wlk28tA%2FlLCW4cc7%2F1VZ3u5RRHqnX4EVR4MpOL24baDlpk, headers: {content-type: image/jpeg, x-amz-server-side-encryption: AES256, x-amzn-trace-id: Root=1-692a919f-03ec89e5301f3fa7374d64fc;Parent=5b49f8c0c6e71872;Sampled=1;Lineage=1:41d6e23e:0, content-length: 82091}}, request_id: 0eee3192-eb51-4f7e-aed6-5893f263929b} */
-  Future<Map<String, dynamic>> getAvatarUploadUrl(
+ Future<Map<String, dynamic>> getAvatarUploadUrl(
     String user_id, {
     required String file_ext,
     required int file_size,

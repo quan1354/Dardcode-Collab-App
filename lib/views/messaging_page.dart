@@ -46,6 +46,8 @@ class _MessagingPageState extends State<MessagingPage> {
 
   Timer? _typingDebounceTimer;
   bool _isUserTyping = false;
+  bool _isFriendTyping = false;
+  Timer? _friendTypingTimer;
 
   @override
   void initState() {
@@ -151,6 +153,7 @@ class _MessagingPageState extends State<MessagingPage> {
 
     // Clean up timers
     _typingDebounceTimer?.cancel();
+    _friendTypingTimer?.cancel();
     widget.apiService.stopTyping();
 
     // Dispose controllers
@@ -297,6 +300,21 @@ class _MessagingPageState extends State<MessagingPage> {
   void _handleTypingEvent(Map<String, dynamic> messageData) {
     // Show typing indicator for the friend
     print('${widget.friendUsername} is typing...');
+    
+    // Cancel previous timer
+    _friendTypingTimer?.cancel();
+    
+    // Set friend typing to true
+    _safeSetState(() {
+      _isFriendTyping = true;
+    });
+    
+    // Auto-hide typing indicator after 3 seconds of no typing events
+    _friendTypingTimer = Timer(const Duration(seconds: 3), () {
+      _safeSetState(() {
+        _isFriendTyping = false;
+      });
+    });
   }
 
   /// Handle send_message event from WebSocket
@@ -726,7 +744,10 @@ class _MessagingPageState extends State<MessagingPage> {
             child: ListView(
               controller: _scrollController,
               padding: const EdgeInsets.symmetric(vertical: 8.0),
-              children: _buildMessageList(),
+              children: [
+                ..._buildMessageList(),
+                if (_isFriendTyping) _buildTypingIndicator(),
+              ],
             ),
           ),
           Container(
@@ -1032,6 +1053,81 @@ class _MessagingPageState extends State<MessagingPage> {
           ],
         ),
       ),
+    );
+  }
+
+  /// Build typing indicator widget with animated dots
+  Widget _buildTypingIndicator() {
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 16.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          CircleAvatar(
+            radius: 16,
+            backgroundColor: Colors.grey,
+            backgroundImage: widget.friendAvatarUrl != null
+                ? NetworkImage(widget.friendAvatarUrl!)
+                : null,
+            child: widget.friendAvatarUrl == null
+                ? const Icon(Icons.person, size: 16, color: Colors.white)
+                : null,
+          ),
+          Container(
+            margin: const EdgeInsets.only(left: 8.0, right: 60.0),
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+            decoration: BoxDecoration(
+              color: Colors.grey[800],
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(20.0),
+                topRight: Radius.circular(20.0),
+                bottomLeft: Radius.circular(4.0),
+                bottomRight: Radius.circular(20.0),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildTypingDot(0),
+                const SizedBox(width: 4),
+                _buildTypingDot(1),
+                const SizedBox(width: 4),
+                _buildTypingDot(2),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Build animated typing dot
+  Widget _buildTypingDot(int index) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.0, end: 1.0),
+      duration: const Duration(milliseconds: 600),
+      builder: (context, value, child) {
+        // Create a wave effect by delaying each dot
+        final delay = index * 0.2;
+        final animValue = ((value + delay) % 1.0);
+        final opacity = 0.3 + (animValue * 0.7);
+        
+        return Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: Colors.grey[400]!.withOpacity(opacity),
+            shape: BoxShape.circle,
+          ),
+        );
+      },
+      onEnd: () {
+        // Restart animation if still typing
+        if (_isFriendTyping && mounted) {
+          setState(() {});
+        }
+      },
     );
   }
 

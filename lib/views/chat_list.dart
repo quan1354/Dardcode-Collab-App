@@ -45,15 +45,7 @@ class _ChatListState extends State<ChatList> {
 
     _fetchUserDataWithToken(widget.accessToken);
     widget.apiService.debugConnectionStatus();
-
-// No need to manually connect - it's already connected after login
-    // Just add message handlers
     widget.apiService.addMessageHandler(_handleWebSocketMessage);
-    widget.apiService.getMessageHistory('10000048', '10000013').then((response) {
-      print('Messages History: ${response['message']}');
-    }).catchError((error) {
-      print('Error fetching messages history: $error');
-    });
   }
 
   @override
@@ -463,7 +455,8 @@ class _ChatListState extends State<ChatList> {
               height: AppConstants.buttonHeight,
               decoration: BoxDecoration(
                 color: Colors.grey[900],
-                borderRadius: BorderRadius.circular(AppConstants.defaultBorderRadius),
+                borderRadius:
+                    BorderRadius.circular(AppConstants.defaultBorderRadius),
               ),
               child: Row(
                 children: [
@@ -642,8 +635,10 @@ class _ChatListState extends State<ChatList> {
                       items: [
                         _buildStatusMenuItem('online', Colors.green, 'Online'),
                         _buildStatusMenuItem('idle', Colors.orange, 'Idle'),
-                        _buildStatusMenuItem('dnd', Colors.red, 'Do Not Disturb'),
-                        _buildStatusMenuItem('invisible', Colors.grey, 'Invisible'),
+                        _buildStatusMenuItem(
+                            'dnd', Colors.red, 'Do Not Disturb'),
+                        _buildStatusMenuItem(
+                            'invisible', Colors.grey, 'Invisible'),
                         _buildStatusMenuItem('offline', Colors.grey, 'Offline'),
                       ],
                       onChanged: (String? newValue) async {
@@ -723,8 +718,8 @@ class _ChatListState extends State<ChatList> {
 
                     try {
                       // Add 'await' and make the callback 'async'
-                      final response =
-                          await widget.apiService.logoutUser(widget.accessToken);
+                      final response = await widget.apiService
+                          .logoutUser(widget.accessToken);
 
                       if (response['success'] == true) {
                         Navigator.pushAndRemoveUntil(
@@ -863,7 +858,8 @@ class _ChatListState extends State<ChatList> {
           children: [
             CircleAvatar(
               backgroundColor: Colors.grey,
-              backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
+              backgroundImage:
+                  avatarUrl != null ? NetworkImage(avatarUrl) : null,
               child: avatarUrl == null
                   ? const Icon(Icons.person, color: Colors.white)
                   : null,
@@ -906,7 +902,8 @@ class _ChatListState extends State<ChatList> {
               username,
               style: TextStyle(
                 color: Colors.white,
-                fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.normal,
+                fontWeight:
+                    unreadCount > 0 ? FontWeight.bold : FontWeight.normal,
               ),
             ),
           ),
@@ -960,7 +957,7 @@ class _ChatListState extends State<ChatList> {
             ),
           ),
         );
-        
+
         // Refresh chat list when returning from messaging page
         if (_userData != null && _userData!['user_id'] != null) {
           print('Refreshing chat list after returning from messaging');
@@ -975,9 +972,10 @@ class _ChatListState extends State<ChatList> {
   }
 
   // Build subtitle with typing indicator or last message - Quick Win 3 & 5
-  Widget _buildSubtitle(Map<String, dynamic> friend, bool isOnline, String? status) {
+  Widget _buildSubtitle(
+      Map<String, dynamic> friend, bool isOnline, String? status) {
     final isTyping = friend['is_typing'] ?? false;
-    
+
     // Handle different last_message structures
     String? lastMessage;
     final lastMessageData = friend['last_message'];
@@ -991,7 +989,7 @@ class _ChatListState extends State<ChatList> {
         lastMessage = messageContent;
       }
     }
-    
+
     final unreadCount = friend['unread_count'] ?? 0;
     final lastSeen = friend['last_seen'];
 
@@ -1061,7 +1059,7 @@ class _ChatListState extends State<ChatList> {
   // Format last seen time - Quick Win 5
   String _formatLastSeen(dynamic lastSeen) {
     if (lastSeen == null) return '';
-    
+
     try {
       DateTime lastSeenTime;
       if (lastSeen is int) {
@@ -1094,9 +1092,10 @@ class _ChatListState extends State<ChatList> {
   }
 
   // Long press chat options (pin/unpin, delete, etc.) - Quick Win 8
-  void _showChatOptions(Map<String, dynamic> friend, String friendUserId, String username) {
+  void _showChatOptions(
+      Map<String, dynamic> friend, String friendUserId, String username) {
     final isPinned = friend['is_pinned'] ?? false;
-    
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.grey[900],
@@ -1168,7 +1167,7 @@ class _ChatListState extends State<ChatList> {
       });
       _filteredFriendsList = List.from(_friendsList);
     });
-    
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -1219,7 +1218,8 @@ class _ChatListState extends State<ChatList> {
   }
 
   // Build status dropdown menu item
-  DropdownMenuItem<String> _buildStatusMenuItem(String value, Color color, String label) {
+  DropdownMenuItem<String> _buildStatusMenuItem(
+      String value, Color color, String label) {
     return DropdownMenuItem(
       value: value,
       child: Row(
